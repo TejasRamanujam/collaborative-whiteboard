@@ -6,7 +6,7 @@ import PresenceCursors from './components/PresenceCursors'
 import SessionTimeline from './components/SessionTimeline'
 import ExportDialog from './components/ExportDialog'
 import { useWebSocket } from './hooks/useWebSocket'
-import { fetchBoards, createBoard, fetchBoard, fetchEvents } from './api'
+import { fetchBoards, createBoard, fetchBoard, fetchEvents, saveStrokes } from './api'
 import { Stroke, Tool, Board } from './types'
 import { ReplayEvent } from './components/SessionTimeline'
 import './App.css'
@@ -108,19 +108,37 @@ function Whiteboard() {
 
   const undoStackRef = useRef<Stroke[][]>([])
   const redoStackRef = useRef<Stroke[][]>([])
+  const loadedRef = useRef(false)
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [boardName, setBoardName] = useState('Whiteboard')
 
   useEffect(() => {
     if (boardId === null) return
+    loadedRef.current = false
     fetchBoard(boardId).then((b) => {
       if (b && b.strokes) {
         setStrokes(b.strokes as Stroke[])
         setBoardName(b.name || 'Whiteboard')
       }
+      loadedRef.current = true
     })
     fetchEvents(boardId).then(setEvents)
   }, [boardId])
+
+  // Persist strokes to the backend over REST (debounced) so drawings are saved
+  // without a live websocket server. Guarded by loadedRef so the initial empty
+  // state can't overwrite a board before it has loaded.
+  useEffect(() => {
+    if (boardId === null || !loadedRef.current) return
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => {
+      saveStrokes(boardId, strokes)
+    }, 600)
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    }
+  }, [strokes, boardId])
 
   const pushUndo = useCallback((s: Stroke[]) => {
     undoStackRef.current.push([...s])
