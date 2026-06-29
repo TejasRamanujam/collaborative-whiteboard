@@ -86,6 +86,11 @@ def save_strokes(board_id: int, body: StrokesUpdate, db: Session = Depends(get_d
         return Response(content='{"error":"not found"}', status_code=404, media_type="application/json")
     board.strokes = body.strokes
     board_manager.set_strokes(board_id, body.strokes)
+    # Keep the session timeline in sync with the saved strokes: one "add" event
+    # per stroke, so the timeline replay/scrub works without a live WS server.
+    db.query(StrokeEvent).filter(StrokeEvent.board_id == board_id).delete()
+    for s in body.strokes:
+        db.add(StrokeEvent(board_id=board_id, user_id="rest", event_type="add", stroke_data=s))
     db.commit()
     return {"ok": True, "count": len(body.strokes)}
 

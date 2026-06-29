@@ -110,6 +110,9 @@ function Whiteboard() {
   const redoStackRef = useRef<Stroke[][]>([])
   const loadedRef = useRef(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // True while the timeline is replaying/scrubbing — saves are suppressed so a
+  // temporary replay view can't overwrite the saved board.
+  const replayingRef = useRef(false)
 
   const [boardName, setBoardName] = useState('Whiteboard')
 
@@ -130,7 +133,7 @@ function Whiteboard() {
   // without a live websocket server. Guarded by loadedRef so the initial empty
   // state can't overwrite a board before it has loaded.
   useEffect(() => {
-    if (boardId === null || !loadedRef.current) return
+    if (boardId === null || !loadedRef.current || replayingRef.current) return
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => {
       saveStrokes(boardId, strokes)
@@ -148,6 +151,7 @@ function Whiteboard() {
 
   const handleStrokeAdd = useCallback(
     (stroke: Stroke) => {
+      replayingRef.current = false
       pushUndo(strokes)
       setStrokes((prev) => [...prev, stroke])
       send({ type: 'stroke_add', data: stroke })
@@ -157,6 +161,7 @@ function Whiteboard() {
 
   const handleStrokeUpdate = useCallback(
     (stroke: Stroke) => {
+      replayingRef.current = false
       setStrokes((prev) =>
         prev.map((s) => (s.id === stroke.id ? stroke : s))
       )
@@ -175,6 +180,7 @@ function Whiteboard() {
   const handleUndo = useCallback(() => {
     const prev = undoStackRef.current.pop()
     if (prev) {
+      replayingRef.current = false
       redoStackRef.current.push([...strokes])
       setStrokes(prev)
     }
@@ -183,12 +189,14 @@ function Whiteboard() {
   const handleRedo = useCallback(() => {
     const next = redoStackRef.current.pop()
     if (next) {
+      replayingRef.current = false
       undoStackRef.current.push([...strokes])
       setStrokes(next)
     }
   }, [strokes])
 
   const handleClear = useCallback(() => {
+    replayingRef.current = false
     pushUndo(strokes)
     setStrokes([])
     send({ type: 'board_clear', data: {} })
@@ -222,6 +230,7 @@ function Whiteboard() {
 
   const handleReplayEvent = useCallback(
     (event: Record<string, unknown>) => {
+      replayingRef.current = true
       const data = event.stroke_data as Stroke | undefined
       if (!data) return
       const et = event.event_type as string
@@ -239,6 +248,7 @@ function Whiteboard() {
   const handleEventSeek = useCallback(
     async (index: number) => {
       if (boardId === null) return
+      replayingRef.current = true
       const allEvents = await fetchEvents(boardId)
       setStrokes([])
       for (let i = 0; i <= index && i < allEvents.length; i++) {

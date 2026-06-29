@@ -130,9 +130,14 @@ const Canvas: React.FC<CanvasProps> = ({
     let offscreen = offscreenRef.current
     if (!offscreen) {
       offscreen = document.createElement('canvas')
+      offscreenRef.current = offscreen
+    }
+    // Keep the offscreen buffer the same size as the visible canvas; otherwise
+    // strokes outside the buffer's initial (default 300x150) size get clipped,
+    // leaving the board blank after a resize/reload.
+    if (offscreen.width !== canvas.width || offscreen.height !== canvas.height) {
       offscreen.width = canvas.width
       offscreen.height = canvas.height
-      offscreenRef.current = offscreen
     }
 
     const ctx = offscreen.getContext('2d')
