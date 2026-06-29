@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import get_db, SessionLocal
@@ -70,6 +71,23 @@ def get_board(board_id: int, db: Session = Depends(get_db)):
         "created_at": board.created_at.isoformat() if board.created_at else None,
         "strokes": board.strokes or [],
     }
+
+
+class StrokesUpdate(BaseModel):
+    strokes: list = []
+
+
+@app.put("/api/boards/{board_id}/strokes")
+def save_strokes(board_id: int, body: StrokesUpdate, db: Session = Depends(get_db)):
+    """Persist the full strokes array for a board over plain REST, so drawings
+    are saved without a live websocket server."""
+    board = db.query(Board).filter(Board.id == board_id).first()
+    if not board:
+        return Response(content='{"error":"not found"}', status_code=404, media_type="application/json")
+    board.strokes = body.strokes
+    board_manager.set_strokes(board_id, body.strokes)
+    db.commit()
+    return {"ok": True, "count": len(body.strokes)}
 
 
 @app.get("/api/boards/{board_id}/events")

@@ -21,6 +21,14 @@ export async function fetchEvents(id: number) {
   return res.json()
 }
 
+export async function saveStrokes(id: number, strokes: unknown[]) {
+  await fetch(`${BASE}/boards/${id}/strokes`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ strokes }),
+  })
+}
+
 export async function exportBoard(id: number, format: string, width: number, height: number) {
   const res = await fetch(
     `${BASE}/boards/${id}/export?format=${format}&width=${width}&height=${height}`
