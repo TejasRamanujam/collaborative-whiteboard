@@ -39,8 +39,15 @@ const ExportDialog: React.FC<ExportDialogProps> = ({ boardId, onClose }) => {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2 className="modal-title">Export Board</h2>
+      <div
+        className="modal"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Export board"
+      >
+        <h2 className="modal-title">Take it with you</h2>
+        <p className="modal-sub">Download this board as an image.</p>
 
         <div className="modal-field">
           <label>Format</label>

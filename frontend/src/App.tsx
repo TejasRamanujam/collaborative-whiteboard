@@ -30,62 +30,166 @@ function getUserId(): string {
   return id
 }
 
+function Squiggle() {
+  return (
+    <svg className="squiggle" viewBox="0 0 220 14" aria-hidden="true">
+      <path
+        d="M3 10 C 25 2, 45 2, 65 9 S 105 14, 125 7 S 165 1, 185 8 S 210 12, 217 6"
+        fill="none"
+        stroke="var(--accent)"
+        strokeWidth="4"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
 function BoardList() {
   const navigate = useNavigate()
   const [boards, setBoards] = useState<Board[]>([])
   const [name, setName] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [creating, setCreating] = useState(false)
 
   useEffect(() => {
-    fetchBoards().then(setBoards)
+    fetchBoards()
+      .then(setBoards)
+      .finally(() => setLoading(false))
   }, [])
 
   const handleCreate = async () => {
-    if (!name.trim()) return
-    const board = await createBoard(name.trim())
-    setBoards((prev) => [board, ...prev])
-    setName('')
-    navigate(`/board/${board.id}`)
+    if (!name.trim() || creating) return
+    setCreating(true)
+    try {
+      const board = await createBoard(name.trim())
+      setBoards((prev) => [board, ...prev])
+      setName('')
+      navigate(`/board/${board.id}`)
+    } finally {
+      setCreating(false)
+    }
   }
 
   return (
-    <div className="board-list">
-      <h1>Whiteboards</h1>
-      <p className="subtitle">Collaborate in real time. Pick up where you left off.</p>
+    <div className="board-list-page">
+      <div className="board-list">
+        <a className="back-pill" href="https://tejas-live-demos.vercel.app">
+          <span aria-hidden="true">←</span> Back to demos
+        </a>
 
-      <div className="create-row">
-        <input
-          className="create-input"
-          placeholder="New board name..."
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-        />
-        <button className="btn btn-primary" onClick={handleCreate}>
-          + Create
-        </button>
-      </div>
-
-      {boards.map((b) => (
-        <div
-          key={b.id}
-          className="board-card"
-          onClick={() => navigate(`/board/${b.id}`)}
-        >
-          <div>
-            <div className="board-name">{b.name}</div>
-            <div className="board-date">
-              {b.created_at ? new Date(b.created_at).toLocaleString() : ''}
-            </div>
+        <header className="hero">
+          <div className="hero-mark" aria-hidden="true">
+            <svg viewBox="0 0 64 64" width="44" height="44">
+              <rect x="4" y="4" width="56" height="56" rx="14" fill="var(--accent)" />
+              <path
+                d="M16 42c6-14 10-20 14-20s2 12 6 12 6-8 12-10"
+                fill="none"
+                stroke="#fff"
+                strokeWidth="5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <circle cx="46" cy="45" r="4" fill="var(--cyan)" />
+            </svg>
           </div>
-          <span style={{ color: 'var(--text-muted)' }}>→</span>
-        </div>
-      ))}
+          <h1>
+            Scribbly
+            <Squiggle />
+          </h1>
+          <p className="subtitle">
+            A whiteboard that remembers. Every stroke is saved — scrub the timeline to
+            watch your doodles come back to life.
+          </p>
+        </header>
 
-      {boards.length === 0 && (
-        <p style={{ color: 'var(--text-muted)', textAlign: 'center', marginTop: 32 }}>
-          No boards yet. Create one to get started.
-        </p>
-      )}
+        <div className="create-row">
+          <input
+            className="create-input"
+            placeholder="Name a new board — “rocket ideas”, “lunch doodles”…"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+            aria-label="New board name"
+          />
+          <button
+            className="btn btn-primary"
+            onClick={handleCreate}
+            disabled={creating || !name.trim()}
+          >
+            {creating ? 'Creating…' : '+ Create'}
+          </button>
+        </div>
+
+        {loading && (
+          <div className="board-skeletons" aria-hidden="true">
+            <div className="skeleton-card" />
+            <div className="skeleton-card" />
+            <div className="skeleton-card" />
+          </div>
+        )}
+
+        {!loading &&
+          boards.map((b) => (
+            <button
+              key={b.id}
+              className="board-card"
+              onClick={() => navigate(`/board/${b.id}`)}
+            >
+              <span className="board-doodle" aria-hidden="true">
+                <svg viewBox="0 0 40 40" width="22" height="22">
+                  <path
+                    d="M8 28c4-10 7-16 10-16s2 9 5 9 4-6 9-8"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="3.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </span>
+              <span className="board-meta">
+                <span className="board-name">{b.name}</span>
+                <span className="board-date">
+                  {b.created_at ? new Date(b.created_at).toLocaleString() : ''}
+                </span>
+              </span>
+              <span className="board-arrow" aria-hidden="true">
+                →
+              </span>
+            </button>
+          ))}
+
+        {!loading && boards.length === 0 && (
+          <div className="empty-state">
+            <svg viewBox="0 0 120 80" width="120" height="80" aria-hidden="true">
+              <rect
+                x="8"
+                y="8"
+                width="104"
+                height="64"
+                rx="12"
+                fill="none"
+                stroke="var(--border-strong)"
+                strokeWidth="3"
+                strokeDasharray="7 8"
+                strokeLinecap="round"
+              />
+              <path
+                d="M32 52c8-18 14-26 20-24s0 16 8 16 8-10 16-12"
+                fill="none"
+                stroke="var(--accent)"
+                strokeWidth="4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                opacity="0.7"
+              />
+              <circle cx="86" cy="54" r="4" fill="var(--cyan)" opacity="0.8" />
+            </svg>
+            <p className="empty-title">A blank page, full of possibility</p>
+            <p className="empty-hint">Name your first board above and start scribbling.</p>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -105,6 +209,7 @@ function Whiteboard() {
   const [cursors, setCursors] = useState<{ user_id: string; x: number; y: number }[]>([])
   const [showExport, setShowExport] = useState(false)
   const [events, setEvents] = useState<ReplayEvent[]>([])
+  const [boardLoading, setBoardLoading] = useState(true)
 
   const undoStackRef = useRef<Stroke[][]>([])
   const redoStackRef = useRef<Stroke[][]>([])
@@ -119,12 +224,14 @@ function Whiteboard() {
   useEffect(() => {
     if (boardId === null) return
     loadedRef.current = false
+    setBoardLoading(true)
     fetchBoard(boardId).then((b) => {
       if (b && b.strokes) {
         setStrokes(b.strokes as Stroke[])
         setBoardName(b.name || 'Whiteboard')
       }
       loadedRef.current = true
+      setBoardLoading(false)
     })
     fetchEvents(boardId).then(setEvents)
   }, [boardId])
@@ -269,16 +376,27 @@ function Whiteboard() {
   return (
     <div className="app">
       <div className="app-header">
-        <h1>{boardName}</h1>
-        <div className="header-actions">
-          <span className="user-badge">{userId}</span>
-          <span
-            className={`conn-dot ${connected ? 'online' : 'offline'}`}
-            title={connected ? 'Connected' : 'Disconnected'}
-          />
-          <button className="btn" onClick={() => navigate('/')}>
-            ← Boards
+        <div className="header-left">
+          <button className="btn back-btn" onClick={() => navigate('/')}>
+            <span aria-hidden="true">←</span> Boards
           </button>
+          <h1 className="board-title">{boardName}</h1>
+        </div>
+        <div className="header-actions">
+          <span
+            className={`sync-pill ${connected ? 'live' : 'solo'}`}
+            title={
+              connected
+                ? 'Live sync is on — strokes broadcast to everyone here'
+                : 'Live sync is offline in this demo — your strokes still autosave to the board'
+            }
+          >
+            <span className="sync-dot" aria-hidden="true" />
+            {connected ? 'Live' : 'Solo · autosaved'}
+          </span>
+          <span className="user-badge" title="Your doodle identity on this board">
+            {userId}
+          </span>
         </div>
       </div>
 
@@ -307,6 +425,29 @@ function Whiteboard() {
           canUndo={undoStackRef.current.length > 0}
           canRedo={redoStackRef.current.length > 0}
         />
+        {boardLoading && (
+          <div className="board-loading" role="status">
+            <span className="board-loading-dot" />
+            <span className="board-loading-dot" />
+            <span className="board-loading-dot" />
+            <span className="board-loading-text">Fetching your strokes…</span>
+          </div>
+        )}
+        {!boardLoading && strokes.length === 0 && (
+          <div className="canvas-hint" aria-hidden="true">
+            <svg viewBox="0 0 90 60" width="72" height="48">
+              <path
+                d="M12 44c8-20 14-30 22-28s0 18 10 18 10-12 22-14"
+                fill="none"
+                stroke="var(--text-faint)"
+                strokeWidth="4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <span>Grab a pen and make a mark</span>
+          </div>
+        )}
       </div>
 
       <SessionTimeline

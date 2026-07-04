@@ -73,11 +73,34 @@ const SessionTimeline: React.FC<SessionTimelineProps> = ({
 
   return (
     <div className="session-timeline">
-      <button className="timeline-btn" onClick={togglePlay} title={playing ? 'Pause' : 'Play'}>
-        {playing ? '⏸' : '▶'}
+      <span className="timeline-label" title="Replay every stroke ever drawn on this board">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7v5l3 3" />
+        </svg>
+        Replay
+      </span>
+      <button
+        className="timeline-btn play"
+        onClick={togglePlay}
+        title={playing ? 'Pause' : 'Play'}
+        aria-label={playing ? 'Pause replay' : 'Play replay'}
+      >
+        {playing ? (
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
+            <rect x="6" y="5" width="4" height="14" rx="1" />
+            <rect x="14" y="5" width="4" height="14" rx="1" />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
+            <path d="M8 5.5v13a1 1 0 0 0 1.5.9l11-6.5a1 1 0 0 0 0-1.8l-11-6.5A1 1 0 0 0 8 5.5Z" />
+          </svg>
+        )}
       </button>
-      <button className="timeline-btn" onClick={reset} title="Reset">
-        ⏹
+      <button className="timeline-btn" onClick={reset} title="Reset" aria-label="Reset replay">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
+          <rect x="6" y="6" width="12" height="12" rx="2" />
+        </svg>
       </button>
       <div className="speed-btns">
         {[0.5, 1, 2].map((s) => (
@@ -85,6 +108,7 @@ const SessionTimeline: React.FC<SessionTimelineProps> = ({
             key={s}
             className={`speed-btn ${speed === s ? 'active' : ''}`}
             onClick={() => setSpeed(s)}
+            aria-pressed={speed === s}
           >
             {s}x
           </button>
@@ -97,6 +121,7 @@ const SessionTimeline: React.FC<SessionTimelineProps> = ({
         max={events.length - 1}
         value={currentIndex}
         onChange={handleScrub}
+        aria-label="Scrub through drawing history"
       />
       <span className="timeline-time">
         {currentIndex >= 0 ? currentIndex + 1 : 0} / {events.length}
