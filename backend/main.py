@@ -60,11 +60,9 @@ def get_board(board_id: int, db: Session = Depends(get_db)):
     if not board:
         return Response(content='{"error":"not found"}', status_code=404, media_type="application/json")
 
-    active_strokes = board_manager.get_strokes(board_id)
-    if active_strokes:
-        board.strokes = active_strokes
-        db.commit()
-
+    # NOTE: the old code overwrote board.strokes from board_manager's in-memory
+    # state here. On serverless that memory is per-instance and can be stale,
+    # which clobbered the DB — the DB row is now authoritative.
     return {
         "id": board.id,
         "name": board.name,
@@ -95,14 +93,43 @@ def save_strokes(board_id: int, body: StrokesUpdate, db: Session = Depends(get_d
     return {"ok": True, "count": len(body.strokes)}
 
 
-@app.get("/api/boards/{board_id}/events")
-def get_events(board_id: int, db: Session = Depends(get_db)):
-    events = (
-        db.query(StrokeEvent)
-        .filter(StrokeEvent.board_id == board_id)
-        .order_by(StrokeEvent.timestamp.asc())
-        .all()
+def _backfill_events(board_id: int, db: Session):
+    """Boards created before the event log existed have strokes but no events.
+    Seed one 'add' event per stroke so the timeline and polling sync work.
+    Locks the board row so two concurrent first-loads don't double-backfill."""
+    board = db.query(Board).filter(Board.id == board_id).with_for_update().first()
+    if not board or not board.strokes:
+        db.rollback()
+        return
+    has_events = (
+        db.query(StrokeEvent.id).filter(StrokeEvent.board_id == board_id).first()
     )
+    if has_events:
+        db.rollback()
+        return
+    for s in board.strokes:
+        if isinstance(s, dict):
+            db.add(
+                StrokeEvent(
+                    board_id=board_id,
+                    user_id=s.get("user_id", "seed"),
+                    event_type="add",
+                    stroke_data=s,
+                )
+            )
+    db.commit()
+
+
+@app.get("/api/boards/{board_id}/events")
+def get_events(board_id: int, since: int = 0, db: Session = Depends(get_db)):
+    """Event log for a board. `since` is an incremental cursor (last event id
+    the client has seen) so polling clients receive small payloads."""
+    if since <= 0:
+        _backfill_events(board_id, db)
+    q = db.query(StrokeEvent).filter(StrokeEvent.board_id == board_id)
+    if since > 0:
+        q = q.filter(StrokeEvent.id > since)
+    events = q.order_by(StrokeEvent.id.asc()).all()
     return [
         {
             "id": e.id,
@@ -116,6 +143,51 @@ def get_events(board_id: int, db: Session = Depends(get_db)):
     ]
 
 
+class EventCreate(BaseModel):
+    user_id: str = "anonymous"
+    event_type: str  # add | update | delete | clear
+    stroke_data: dict = {}
+
+
+@app.post("/api/boards/{board_id}/events")
+def create_event(board_id: int, body: EventCreate, db: Session = Depends(get_db)):
+    """Append a stroke event to the board's log (the sync channel for polling
+    clients) and apply it to the board's materialized strokes array."""
+    if body.event_type not in ("add", "update", "delete", "clear"):
+        return Response(
+            content='{"error":"invalid event_type"}',
+            status_code=422,
+            media_type="application/json",
+        )
+    board = db.query(Board).filter(Board.id == board_id).with_for_update().first()
+    if not board:
+        return Response(content='{"error":"not found"}', status_code=404, media_type="application/json")
+
+    event = StrokeEvent(
+        board_id=board_id,
+        user_id=body.user_id,
+        event_type=body.event_type,
+        stroke_data=body.stroke_data,
+    )
+    db.add(event)
+
+    strokes = [s for s in (board.strokes or []) if isinstance(s, dict)]
+    sid = (body.stroke_data or {}).get("id")
+    if body.event_type in ("add", "update") and sid is not None:
+        strokes = [s for s in strokes if s.get("id") != sid]
+        strokes.append(body.stroke_data)
+    elif body.event_type == "delete" and sid is not None:
+        strokes = [s for s in strokes if s.get("id") != sid]
+    elif body.event_type == "clear":
+        strokes = []
+    board.strokes = strokes
+
+    db.commit()
+    db.refresh(event)
+    return {"id": event.id, "event_type": event.event_type}
+
+
+@app.get("/api/boards/{board_id}/export")
 @app.post("/api/boards/{board_id}/export")
 def export_board(
     board_id: int,
@@ -181,6 +253,9 @@ async def upload_image(board_id: int, file: UploadFile = File(...), db: Session 
         strokes = list(board.strokes or [])
         strokes.append(stroke_data)
         board.strokes = strokes
+        # Keep the event log a superset of the strokes array so polling
+        # clients and the timeline see uploaded images too.
+        db.add(StrokeEvent(board_id=board_id, user_id="system", event_type="add", stroke_data=stroke_data))
         db.commit()
 
     board_manager.strokes[board_id] = board_manager.strokes.get(board_id, []) + [stroke_data]

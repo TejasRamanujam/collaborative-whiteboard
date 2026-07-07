@@ -16,17 +16,23 @@ export async function fetchBoard(id: number) {
   return res.json()
 }
 
-export async function fetchEvents(id: number) {
-  const res = await fetch(`${BASE}/boards/${id}/events`)
+export async function fetchEvents(id: number, since = 0) {
+  const res = await fetch(`${BASE}/boards/${id}/events?since=${since}`)
+  if (!res.ok) throw new Error(`events request failed: ${res.status}`)
   return res.json()
 }
 
-export async function saveStrokes(id: number, strokes: unknown[]) {
-  await fetch(`${BASE}/boards/${id}/strokes`, {
-    method: 'PUT',
+export async function postEvent(
+  id: number,
+  event: { user_id: string; event_type: string; stroke_data: Record<string, unknown> }
+) {
+  const res = await fetch(`${BASE}/boards/${id}/events`, {
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ strokes }),
+    body: JSON.stringify(event),
   })
+  if (!res.ok) throw new Error(`post event failed: ${res.status}`)
+  return res.json()
 }
 
 export async function exportBoard(id: number, format: string, width: number, height: number) {

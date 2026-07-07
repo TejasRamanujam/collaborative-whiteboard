@@ -69,10 +69,16 @@
   border: 1px solid rgba(94, 222, 140, 0.35);
 }
 
-.sync-pill.solo {
-  background: var(--cyan-dim);
-  color: var(--cyan);
-  border: 1px solid rgba(76, 201, 240, 0.32);
+.sync-pill.connecting {
+  background: rgba(255, 209, 102, 0.1);
+  color: var(--amber);
+  border: 1px solid rgba(255, 209, 102, 0.32);
+}
+
+.sync-pill.offline {
+  background: rgba(255, 107, 138, 0.1);
+  color: var(--red);
+  border: 1px solid rgba(255, 107, 138, 0.32);
 }
 
 .sync-dot {
@@ -356,34 +362,6 @@
 .width-slider {
   width: 70px;
   accent-color: var(--accent);
-}
-
-/* ============ Presence Cursors ============ */
-.presence-cursor {
-  position: absolute;
-  width: 14px;
-  height: 14px;
-  border: 2px solid;
-  border-radius: 50% 50% 50% 4px;
-  pointer-events: none;
-  z-index: 20;
-  transform: translate(-50%, -50%) rotate(-45deg);
-  transition: left 0.08s linear, top 0.08s linear;
-}
-
-.presence-label {
-  position: absolute;
-  left: 12px;
-  top: -6px;
-  font-size: 10px;
-  font-weight: 600;
-  color: #fff;
-  padding: 2px 8px;
-  border-radius: 999px;
-  white-space: nowrap;
-  pointer-events: none;
-  transform: rotate(45deg);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
 /* ============ Session Timeline ============ */

@@ -8,7 +8,8 @@ interface CanvasProps {
   width: number
   onStrokeAdd: (stroke: Stroke) => void
   onStrokeUpdate: (stroke: Stroke) => void
-  onCursorMove: (x: number, y: number) => void
+  onStrokeEnd?: (stroke: Stroke) => void
+  onCursorMove?: (x: number, y: number) => void
   readOnly?: boolean
 }
 
@@ -112,6 +113,7 @@ const Canvas: React.FC<CanvasProps> = ({
   width,
   onStrokeAdd,
   onStrokeUpdate,
+  onStrokeEnd,
   onCursorMove,
   readOnly,
 }) => {
@@ -217,7 +219,7 @@ const Canvas: React.FC<CanvasProps> = ({
       const pt = getCanvasPoint(e)
       isDrawingRef.current = true
 
-      const userId = localStorage.getItem('userId') || 'user'
+      const userId = localStorage.getItem('whiteboard_user_id') || 'user'
 
       if (tool === 'rectangle' || tool === 'circle' || tool === 'line') {
         shapeDraftRef.current = {
@@ -261,7 +263,7 @@ const Canvas: React.FC<CanvasProps> = ({
       if (!isDrawingRef.current || readOnly) return
       e.preventDefault()
       const pt = getCanvasPoint(e)
-      onCursorMove(pt.x, pt.y)
+      onCursorMove?.(pt.x, pt.y)
 
       if (shapeDraftRef.current) {
         shapeDraftRef.current.endX = pt.x
@@ -324,12 +326,14 @@ const Canvas: React.FC<CanvasProps> = ({
   const endDraw = useCallback(
     (e: React.MouseEvent | React.TouchEvent) => {
       if (!isDrawingRef.current || readOnly) return
+      const finished = currentStrokeRef.current
       isDrawingRef.current = false
       shapeDraftRef.current = null
       currentStrokeRef.current = null
       renderAll()
+      if (finished && onStrokeEnd) onStrokeEnd(finished)
     },
-    [readOnly, renderAll]
+    [readOnly, renderAll, onStrokeEnd]
   )
 
   return (

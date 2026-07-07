@@ -2,11 +2,10 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { Routes, Route, useNavigate, useParams } from 'react-router-dom'
 import Canvas from './components/Canvas'
 import Toolbar from './components/Toolbar'
-import PresenceCursors from './components/PresenceCursors'
 import SessionTimeline from './components/SessionTimeline'
 import ExportDialog from './components/ExportDialog'
-import { useWebSocket } from './hooks/useWebSocket'
-import { fetchBoards, createBoard, fetchBoard, fetchEvents, saveStrokes } from './api'
+import { usePollingSync } from './hooks/usePollingSync'
+import { fetchBoards, createBoard, fetchBoard } from './api'
 import { Stroke, Tool, Board } from './types'
 import { ReplayEvent } from './components/SessionTimeline'
 import './App.css'
@@ -194,184 +193,173 @@ function BoardList() {
   )
 }
 
+/** Apply a batch of stroke events to a strokes array (idempotent). */
+function applyEventsToStrokes(base: Stroke[], evs: ReplayEvent[]): Stroke[] {
+  let next = base
+  for (const ev of evs) {
+    const data = ev.stroke_data as unknown as Stroke | undefined
+    const et = ev.event_type
+    if ((et === 'add' || et === 'update') && data && data.id) {
+      next = [...next.filter((s) => s.id !== data.id), data]
+    } else if (et === 'delete' && data && data.id) {
+      next = next.filter((s) => s.id !== data.id)
+    } else if (et === 'clear') {
+      next = []
+    }
+  }
+  return next
+}
+
+const SYNC_META = {
+  live: {
+    cls: 'live',
+    label: 'Live · syncing',
+    title: 'Synced with everyone on this board every few seconds',
+  },
+  connecting: {
+    cls: 'connecting',
+    label: 'Connecting…',
+    title: 'Reaching the board server',
+  },
+  offline: {
+    cls: 'offline',
+    label: 'Offline · retrying',
+    title: 'Can’t reach the server right now — new strokes stay local until it’s back',
+  },
+} as const
+
 function Whiteboard() {
   const { boardId: boardIdStr } = useParams<{ boardId: string }>()
   const boardId = boardIdStr ? parseInt(boardIdStr, 10) : null
   const [userId] = useState(getUserId)
   const navigate = useNavigate()
 
-  const { send, connected, addListener } = useWebSocket(boardId, userId)
-
   const [strokes, setStrokes] = useState<Stroke[]>([])
   const [tool, setTool] = useState<Tool>('pen')
   const [color, setColor] = useState('#ffffff')
   const [width, setWidth] = useState(3)
-  const [cursors, setCursors] = useState<{ user_id: string; x: number; y: number }[]>([])
   const [showExport, setShowExport] = useState(false)
   const [events, setEvents] = useState<ReplayEvent[]>([])
   const [boardLoading, setBoardLoading] = useState(true)
 
-  const undoStackRef = useRef<Stroke[][]>([])
-  const redoStackRef = useRef<Stroke[][]>([])
-  const loadedRef = useRef(false)
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // True while the timeline is replaying/scrubbing — saves are suppressed so a
-  // temporary replay view can't overwrite the saved board.
+  // Per-user undo/redo: the stacks hold this client's own strokes only, so
+  // undoing never deletes another participant's work on the shared board.
+  const undoStackRef = useRef<Stroke[]>([])
+  const redoStackRef = useRef<Stroke[]>([])
+  // True while the timeline is replaying/scrubbing — polling is paused so the
+  // replay view isn't stomped by live updates.
   const replayingRef = useRef(false)
 
   const [boardName, setBoardName] = useState('Whiteboard')
 
-  useEffect(() => {
-    if (boardId === null) return
-    loadedRef.current = false
-    setBoardLoading(true)
-    fetchBoard(boardId).then((b) => {
-      if (b && b.strokes) {
-        setStrokes(b.strokes as Stroke[])
-        setBoardName(b.name || 'Whiteboard')
-      }
-      loadedRef.current = true
-      setBoardLoading(false)
-    })
-    fetchEvents(boardId).then(setEvents)
-  }, [boardId])
-
-  // Persist strokes to the backend over REST (debounced) so drawings are saved
-  // without a live websocket server. Guarded by loadedRef so the initial empty
-  // state can't overwrite a board before it has loaded.
-  useEffect(() => {
-    if (boardId === null || !loadedRef.current || replayingRef.current) return
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(() => {
-      saveStrokes(boardId, strokes)
-    }, 600)
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+  // Remote events arriving from the polling loop. The first batch (and any
+  // post-replay resync, reset === true) rebuilds state from the full log;
+  // later batches are applied incrementally.
+  const handleRemoteEvents = useCallback((evs: ReplayEvent[], reset: boolean) => {
+    if (reset) {
+      setEvents(evs)
+      setStrokes(applyEventsToStrokes([], evs))
+    } else {
+      setEvents((prev) => [...prev, ...evs])
+      setStrokes((prev) => applyEventsToStrokes(prev, evs))
     }
-  }, [strokes, boardId])
-
-  const pushUndo = useCallback((s: Stroke[]) => {
-    undoStackRef.current.push([...s])
-    if (undoStackRef.current.length > 50) undoStackRef.current.shift()
-    redoStackRef.current = []
   }, [])
 
-  const handleStrokeAdd = useCallback(
-    (stroke: Stroke) => {
-      replayingRef.current = false
-      pushUndo(strokes)
-      setStrokes((prev) => [...prev, stroke])
-      send({ type: 'stroke_add', data: stroke })
-    },
-    [strokes, send, pushUndo]
+  const { status: syncStatus, sendEvent } = usePollingSync(
+    boardId,
+    userId,
+    handleRemoteEvents,
+    replayingRef
   )
 
-  const handleStrokeUpdate = useCallback(
-    (stroke: Stroke) => {
-      replayingRef.current = false
-      setStrokes((prev) =>
-        prev.map((s) => (s.id === stroke.id ? stroke : s))
-      )
-      send({ type: 'stroke_update', data: stroke })
-    },
-    [send]
-  )
+  useEffect(() => {
+    if (boardId === null) return
+    setBoardLoading(true)
+    setEvents([])
+    setStrokes([])
+    undoStackRef.current = []
+    redoStackRef.current = []
+    fetchBoard(boardId).then((b) => {
+      if (b) setBoardName(b.name || 'Whiteboard')
+    })
+  }, [boardId])
 
-  const handleCursorMove = useCallback(
-    (x: number, y: number) => {
-      send({ type: 'cursor_move', x, y })
+  // The board is "loaded" once the first poll answers (the full event log
+  // rebuilds the drawing) — or fails, in which case we show the offline pill.
+  useEffect(() => {
+    if (syncStatus !== 'connecting') setBoardLoading(false)
+  }, [syncStatus])
+
+  const handleStrokeAdd = useCallback((stroke: Stroke) => {
+    replayingRef.current = false
+    // Track the stroke as undoable immediately (id is fixed at draw start);
+    // the finished version replaces it in handleStrokeEnd.
+    undoStackRef.current.push(stroke)
+    if (undoStackRef.current.length > 50) undoStackRef.current.shift()
+    redoStackRef.current = []
+    setStrokes((prev) => [...prev, stroke])
+  }, [])
+
+  const handleStrokeUpdate = useCallback((stroke: Stroke) => {
+    replayingRef.current = false
+    setStrokes((prev) => prev.map((s) => (s.id === stroke.id ? stroke : s)))
+  }, [])
+
+  // The finished stroke is pushed to the server once, when drawing ends.
+  const handleStrokeEnd = useCallback(
+    (stroke: Stroke) => {
+      const stack = undoStackRef.current
+      if (stack.length > 0 && stack[stack.length - 1].id === stroke.id) {
+        stack[stack.length - 1] = stroke
+      }
+      sendEvent('add', stroke as unknown as Record<string, unknown>)
     },
-    [send]
+    [sendEvent]
   )
 
   const handleUndo = useCallback(() => {
-    const prev = undoStackRef.current.pop()
-    if (prev) {
+    const stroke = undoStackRef.current.pop()
+    if (stroke) {
       replayingRef.current = false
-      redoStackRef.current.push([...strokes])
-      setStrokes(prev)
+      redoStackRef.current.push(stroke)
+      setStrokes((prev) => prev.filter((s) => s.id !== stroke.id))
+      sendEvent('delete', { id: stroke.id })
     }
-  }, [strokes])
+  }, [sendEvent])
 
   const handleRedo = useCallback(() => {
-    const next = redoStackRef.current.pop()
-    if (next) {
+    const stroke = redoStackRef.current.pop()
+    if (stroke) {
       replayingRef.current = false
-      undoStackRef.current.push([...strokes])
-      setStrokes(next)
+      undoStackRef.current.push(stroke)
+      setStrokes((prev) => [...prev.filter((s) => s.id !== stroke.id), stroke])
+      sendEvent('add', stroke as unknown as Record<string, unknown>)
     }
-  }, [strokes])
+  }, [sendEvent])
 
+  // Clearing wipes the shared board for everyone and is not undoable.
   const handleClear = useCallback(() => {
     replayingRef.current = false
-    pushUndo(strokes)
+    undoStackRef.current = []
+    redoStackRef.current = []
     setStrokes([])
-    send({ type: 'board_clear', data: {} })
-  }, [strokes, send, pushUndo])
+    sendEvent('clear', {})
+  }, [sendEvent])
 
-  useEffect(() => {
-    const unsub = addListener((msg) => {
-      if (msg.type === 'stroke_event') {
-        const data = msg.data as Stroke
-        const eventType = msg.event_type as string
-        if (eventType === 'add') {
-          setStrokes((prev) => [...prev.filter((s) => s.id !== data.id), data])
-        } else if (eventType === 'update') {
-          setStrokes((prev) =>
-            prev.map((s) => (s.id === data.id ? data : s))
-          )
-        } else if (eventType === 'delete') {
-          setStrokes((prev) => prev.filter((s) => s.id !== data.id))
-        } else if (eventType === 'clear') {
-          setStrokes([])
-        }
-      } else if (msg.type === 'cursor_move') {
-        setCursors((prev) => {
-          const filtered = prev.filter((c) => c.user_id !== (msg.user_id as string))
-          return [...filtered, { user_id: msg.user_id as string, x: msg.x as number, y: msg.y as number }]
-        })
-      }
-    })
-    return unsub
-  }, [addListener])
-
-  const handleReplayEvent = useCallback(
-    (event: Record<string, unknown>) => {
-      replayingRef.current = true
-      const data = event.stroke_data as Stroke | undefined
-      if (!data) return
-      const et = event.event_type as string
-      if (et === 'add') {
-        setStrokes((prev) => [...prev.filter((s) => s.id !== data.id), data])
-      } else if (et === 'delete') {
-        setStrokes((prev) => prev.filter((s) => s.id !== data.id))
-      } else if (et === 'clear') {
-        setStrokes([])
-      }
-    },
-    []
-  )
+  const handleReplayEvent = useCallback((event: Record<string, unknown>) => {
+    replayingRef.current = true
+    setStrokes((prev) => applyEventsToStrokes(prev, [event as unknown as ReplayEvent]))
+  }, [])
 
   const handleEventSeek = useCallback(
-    async (index: number) => {
-      if (boardId === null) return
+    (index: number) => {
       replayingRef.current = true
-      const allEvents = await fetchEvents(boardId)
-      setStrokes([])
-      for (let i = 0; i <= index && i < allEvents.length; i++) {
-        const ev = allEvents[i] as Record<string, unknown>
-        const data = ev.stroke_data as Stroke | undefined
-        if (!data) continue
-        const et = ev.event_type as string
-        if (et === 'add') {
-          setStrokes((prev) => [...prev.filter((s) => s.id !== data.id), data])
-        }
-      }
+      setStrokes(applyEventsToStrokes([], events.slice(0, index + 1)))
     },
-    [boardId]
+    [events]
   )
 
-  const otherCursors = cursors.filter((c) => c.user_id !== userId)
+  const sync = SYNC_META[syncStatus]
 
   return (
     <div className="app">
@@ -383,16 +371,9 @@ function Whiteboard() {
           <h1 className="board-title">{boardName}</h1>
         </div>
         <div className="header-actions">
-          <span
-            className={`sync-pill ${connected ? 'live' : 'solo'}`}
-            title={
-              connected
-                ? 'Live sync is on — strokes broadcast to everyone here'
-                : 'Live sync is offline in this demo — your strokes still autosave to the board'
-            }
-          >
+          <span className={`sync-pill ${sync.cls}`} title={sync.title}>
             <span className="sync-dot" aria-hidden="true" />
-            {connected ? 'Live' : 'Solo · autosaved'}
+            {sync.label}
           </span>
           <span className="user-badge" title="Your doodle identity on this board">
             {userId}
@@ -408,9 +389,8 @@ function Whiteboard() {
           width={width}
           onStrokeAdd={handleStrokeAdd}
           onStrokeUpdate={handleStrokeUpdate}
-          onCursorMove={handleCursorMove}
+          onStrokeEnd={handleStrokeEnd}
         />
-        <PresenceCursors cursors={otherCursors} />
         <Toolbar
           tool={tool}
           setTool={setTool}
