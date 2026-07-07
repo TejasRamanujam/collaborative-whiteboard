@@ -5,7 +5,7 @@ import Toolbar from './components/Toolbar'
 import SessionTimeline from './components/SessionTimeline'
 import ExportDialog from './components/ExportDialog'
 import { usePollingSync } from './hooks/usePollingSync'
-import { fetchBoards, createBoard, fetchBoard } from './api'
+import { fetchBoards, createBoard, deleteBoard, fetchBoard } from './api'
 import { Stroke, Tool, Board } from './types'
 import { ReplayEvent } from './components/SessionTimeline'
 import './App.css'
@@ -69,6 +69,16 @@ function BoardList() {
     }
   }
 
+  const handleDelete = async (b: Board) => {
+    if (!window.confirm(`Delete "${b.name}" and all its strokes? This cannot be undone.`)) return
+    try {
+      await deleteBoard(b.id)
+      setBoards((prev) => prev.filter((x) => x.id !== b.id))
+    } catch {
+      window.alert('Could not delete the board — try again.')
+    }
+  }
+
   return (
     <div className="board-list-page">
       <div className="board-list">
@@ -129,33 +139,51 @@ function BoardList() {
 
         {!loading &&
           boards.map((b) => (
-            <button
-              key={b.id}
-              className="board-card"
-              onClick={() => navigate(`/board/${b.id}`)}
-            >
-              <span className="board-doodle" aria-hidden="true">
-                <svg viewBox="0 0 40 40" width="22" height="22">
+            <div key={b.id} className="board-card-wrap">
+              <button
+                className="board-card"
+                onClick={() => navigate(`/board/${b.id}`)}
+              >
+                <span className="board-doodle" aria-hidden="true">
+                  <svg viewBox="0 0 40 40" width="22" height="22">
+                    <path
+                      d="M8 28c4-10 7-16 10-16s2 9 5 9 4-6 9-8"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="3.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </span>
+                <span className="board-meta">
+                  <span className="board-name">{b.name}</span>
+                  <span className="board-date">
+                    {b.created_at ? new Date(b.created_at).toLocaleString() : ''}
+                  </span>
+                </span>
+                <span className="board-arrow" aria-hidden="true">
+                  →
+                </span>
+              </button>
+              <button
+                className="board-delete"
+                aria-label={`Delete board ${b.name}`}
+                title="Delete board"
+                onClick={() => handleDelete(b)}
+              >
+                <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
                   <path
-                    d="M8 28c4-10 7-16 10-16s2 9 5 9 4-6 9-8"
+                    d="M4 7h16M10 4h4M7 7l1 13h8l1-13M10 11v6M14 11v6"
                     fill="none"
                     stroke="currentColor"
-                    strokeWidth="3.5"
+                    strokeWidth="2"
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
                 </svg>
-              </span>
-              <span className="board-meta">
-                <span className="board-name">{b.name}</span>
-                <span className="board-date">
-                  {b.created_at ? new Date(b.created_at).toLocaleString() : ''}
-                </span>
-              </span>
-              <span className="board-arrow" aria-hidden="true">
-                →
-              </span>
-            </button>
+              </button>
+            </div>
           ))}
 
         {!loading && boards.length === 0 && (

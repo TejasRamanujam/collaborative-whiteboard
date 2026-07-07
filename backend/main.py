@@ -54,6 +54,17 @@ def create_board(name: str = "Untitled", db: Session = Depends(get_db)):
     }
 
 
+@app.delete("/api/boards/{board_id}")
+def delete_board(board_id: int, db: Session = Depends(get_db)):
+    board = db.query(Board).filter(Board.id == board_id).first()
+    if not board:
+        return Response(content='{"error":"not found"}', status_code=404, media_type="application/json")
+    db.query(StrokeEvent).filter(StrokeEvent.board_id == board_id).delete()
+    db.delete(board)
+    db.commit()
+    return {"deleted": board_id}
+
+
 @app.get("/api/boards/{board_id}")
 def get_board(board_id: int, db: Session = Depends(get_db)):
     board = db.query(Board).filter(Board.id == board_id).first()

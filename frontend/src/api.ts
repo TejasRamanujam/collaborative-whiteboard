@@ -10,6 +10,12 @@ export async function createBoard(name: string) {
   return res.json()
 }
 
+export async function deleteBoard(id: number) {
+  const res = await fetch(`${BASE}/boards/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(`delete board failed: ${res.status}`)
+  return res.json()
+}
+
 export async function fetchBoard(id: number) {
   const res = await fetch(`${BASE}/boards/${id}`)
   if (!res.ok) return null

@@ -568,6 +568,40 @@
 }
 
 /* Board cards */
+.board-card-wrap {
+  position: relative;
+}
+
+.board-delete {
+  position: absolute;
+  top: 50%;
+  right: 52px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-faint);
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.board-card-wrap:hover .board-delete,
+.board-delete:focus-visible {
+  opacity: 1;
+}
+
+.board-delete:hover,
+.board-delete:focus-visible {
+  color: #ff6b7a;
+  border-color: rgba(255, 107, 122, 0.4);
+  background: rgba(255, 107, 122, 0.08);
+}
+
 .board-card {
   width: 100%;
   display: flex;
