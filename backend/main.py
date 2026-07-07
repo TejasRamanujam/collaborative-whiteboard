@@ -1,8 +1,11 @@
 import json
+import os
+import re
 import time
 from datetime import datetime, timezone
 from typing import Optional
 
+import httpx
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -327,6 +330,50 @@ async def websocket_endpoint(ws: WebSocket, board_id: int, user_id: str = Query(
         pass
     finally:
         await board_manager.disconnect(ws, board_id)
+
+
+class LiveblocksAuthRequest(BaseModel):
+    room: str
+    user_id: str = "anonymous"
+
+
+@app.post("/api/liveblocks-auth")
+def liveblocks_auth(body: LiveblocksAuthRequest):
+    """Issue a Liveblocks room token for realtime sync. The secret key stays
+    server-side (env LIVEBLOCKS_SECRET_KEY); clients only ever see the
+    short-lived token scoped to a single board room."""
+    secret = os.environ.get("LIVEBLOCKS_SECRET_KEY", "")
+    if not secret:
+        return Response(
+            content='{"error":"realtime not configured"}',
+            status_code=503,
+            media_type="application/json",
+        )
+    if not re.fullmatch(r"board-\d{1,10}", body.room):
+        return Response(
+            content='{"error":"invalid room"}',
+            status_code=400,
+            media_type="application/json",
+        )
+    user_id = (body.user_id or "anonymous")[:64]
+    try:
+        resp = httpx.post(
+            "https://api.liveblocks.io/v2/authorize-user",
+            json={"userId": user_id, "permissions": {body.room: ["room:write"]}},
+            headers={"Authorization": f"Bearer {secret}"},
+            timeout=10.0,
+        )
+    except httpx.HTTPError:
+        return Response(
+            content='{"error":"liveblocks unreachable"}',
+            status_code=502,
+            media_type="application/json",
+        )
+    return Response(
+        content=resp.text,
+        status_code=resp.status_code,
+        media_type="application/json",
+    )
 
 
 @app.get("/health")

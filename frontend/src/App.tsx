@@ -4,7 +4,9 @@ import Canvas from './components/Canvas'
 import Toolbar from './components/Toolbar'
 import SessionTimeline from './components/SessionTimeline'
 import ExportDialog from './components/ExportDialog'
+import PresenceCursors from './components/PresenceCursors'
 import { usePollingSync } from './hooks/usePollingSync'
+import { useLiveblocksRoom, BoardRoomEvent } from './hooks/useLiveblocksRoom'
 import { fetchBoards, createBoard, deleteBoard, fetchBoard } from './api'
 import { Stroke, Tool, Board } from './types'
 import { ReplayEvent } from './components/SessionTimeline'
@@ -239,6 +241,11 @@ function applyEventsToStrokes(base: Stroke[], evs: ReplayEvent[]): Stroke[] {
 }
 
 const SYNC_META = {
+  realtime: {
+    cls: 'realtime',
+    label: 'Live · realtime',
+    title: 'Connected in realtime — strokes and cursors appear instantly',
+  },
   live: {
     cls: 'live',
     label: 'Live · syncing',
@@ -293,12 +300,64 @@ function Whiteboard() {
     }
   }, [])
 
+  // Realtime transport (Liveblocks). Broadcast events from other clients are
+  // applied immediately; the polling loop below reconciles against the
+  // durable Neon event log (idempotent by stroke id, so no double-apply).
+  const handleRealtimeEvent = useCallback((ev: BoardRoomEvent) => {
+    if (replayingRef.current) return
+    setStrokes((prev) =>
+      applyEventsToStrokes(prev, [
+        { event_type: ev.event_type, stroke_data: ev.stroke_data } as ReplayEvent,
+      ])
+    )
+  }, [])
+
+  const {
+    connected: rtConnected,
+    others: remoteCursors,
+    broadcast,
+    updateCursor,
+  } = useLiveblocksRoom(boardId, userId, handleRealtimeEvent)
+
+  // Polling is primary transport at 2.5s; once realtime is connected it only
+  // reconciles (and feeds the timeline), so stretch it to 12s.
+  const pollIntervalRef = useRef(2500)
+  useEffect(() => {
+    pollIntervalRef.current = rtConnected ? 12000 : 2500
+  }, [rtConnected])
+
   const { status: syncStatus, sendEvent } = usePollingSync(
     boardId,
     userId,
     handleRemoteEvents,
-    replayingRef
+    replayingRef,
+    pollIntervalRef
   )
+
+  // Every local mutation goes to the durable event log AND out over realtime.
+  const emitEvent = useCallback(
+    (event_type: string, stroke_data: Record<string, unknown>) => {
+      sendEvent(event_type, stroke_data)
+      broadcast({ event_type, stroke_data, user_id: userId })
+    },
+    [sendEvent, broadcast, userId]
+  )
+
+  // Live cursor presence, throttled to ~40ms, in canvas coordinates.
+  const lastCursorSentRef = useRef(0)
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const now = performance.now()
+      if (now - lastCursorSentRef.current < 40) return
+      lastCursorSentRef.current = now
+      const rect = e.currentTarget.getBoundingClientRect()
+      updateCursor({ x: e.clientX - rect.left, y: e.clientY - rect.top })
+    },
+    [updateCursor]
+  )
+  const handlePointerLeave = useCallback(() => {
+    updateCursor(null)
+  }, [updateCursor])
 
   useEffect(() => {
     if (boardId === null) return
@@ -340,9 +399,9 @@ function Whiteboard() {
       if (stack.length > 0 && stack[stack.length - 1].id === stroke.id) {
         stack[stack.length - 1] = stroke
       }
-      sendEvent('add', stroke as unknown as Record<string, unknown>)
+      emitEvent('add', stroke as unknown as Record<string, unknown>)
     },
-    [sendEvent]
+    [emitEvent]
   )
 
   const handleUndo = useCallback(() => {
@@ -351,9 +410,9 @@ function Whiteboard() {
       replayingRef.current = false
       redoStackRef.current.push(stroke)
       setStrokes((prev) => prev.filter((s) => s.id !== stroke.id))
-      sendEvent('delete', { id: stroke.id })
+      emitEvent('delete', { id: stroke.id })
     }
-  }, [sendEvent])
+  }, [emitEvent])
 
   const handleRedo = useCallback(() => {
     const stroke = redoStackRef.current.pop()
@@ -361,9 +420,9 @@ function Whiteboard() {
       replayingRef.current = false
       undoStackRef.current.push(stroke)
       setStrokes((prev) => [...prev.filter((s) => s.id !== stroke.id), stroke])
-      sendEvent('add', stroke as unknown as Record<string, unknown>)
+      emitEvent('add', stroke as unknown as Record<string, unknown>)
     }
-  }, [sendEvent])
+  }, [emitEvent])
 
   // Clearing wipes the shared board for everyone and is not undoable.
   const handleClear = useCallback(() => {
@@ -371,8 +430,8 @@ function Whiteboard() {
     undoStackRef.current = []
     redoStackRef.current = []
     setStrokes([])
-    sendEvent('clear', {})
-  }, [sendEvent])
+    emitEvent('clear', {})
+  }, [emitEvent])
 
   const handleReplayEvent = useCallback((event: Record<string, unknown>) => {
     replayingRef.current = true
@@ -387,7 +446,7 @@ function Whiteboard() {
     [events]
   )
 
-  const sync = SYNC_META[syncStatus]
+  const sync = SYNC_META[rtConnected ? 'realtime' : syncStatus]
 
   return (
     <div className="app">
@@ -409,7 +468,11 @@ function Whiteboard() {
         </div>
       </div>
 
-      <div className="board-area">
+      <div
+        className="board-area"
+        onPointerMove={handlePointerMove}
+        onPointerLeave={handlePointerLeave}
+      >
         <Canvas
           strokes={strokes}
           tool={tool}
@@ -419,6 +482,7 @@ function Whiteboard() {
           onStrokeUpdate={handleStrokeUpdate}
           onStrokeEnd={handleStrokeEnd}
         />
+        <PresenceCursors cursors={remoteCursors} />
         <Toolbar
           tool={tool}
           setTool={setTool}

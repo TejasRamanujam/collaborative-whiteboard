@@ -63,10 +63,16 @@
   cursor: help;
 }
 
-.sync-pill.live {
+.sync-pill.realtime {
   background: rgba(94, 222, 140, 0.12);
   color: var(--green);
   border: 1px solid rgba(94, 222, 140, 0.35);
+}
+
+.sync-pill.live {
+  background: var(--cyan-dim);
+  color: var(--cyan);
+  border: 1px solid rgba(76, 201, 240, 0.32);
 }
 
 .sync-pill.connecting {
@@ -362,6 +368,27 @@
 .width-slider {
   width: 70px;
   accent-color: var(--accent);
+}
+
+/* ============ Presence Cursors (Liveblocks) ============ */
+.presence-cursor {
+  position: absolute;
+  pointer-events: none;
+  z-index: 20;
+  transition: left 0.06s linear, top 0.06s linear;
+}
+
+.presence-label {
+  position: absolute;
+  left: 14px;
+  top: 14px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #12101c;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
 /* ============ Session Timeline ============ */

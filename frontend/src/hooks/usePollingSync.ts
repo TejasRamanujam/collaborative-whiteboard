@@ -24,7 +24,10 @@ export function usePollingSync(
   boardId: number | null,
   userId: string,
   onEvents: (events: ReplayEvent[], reset: boolean) => void,
-  pausedRef: React.MutableRefObject<boolean>
+  pausedRef: React.MutableRefObject<boolean>,
+  // Optional dynamic interval (ms) — stretched while a realtime transport is
+  // connected and polling is only reconciliation, tightened when it's primary.
+  intervalRef?: React.MutableRefObject<number>
 ) {
   const [status, setStatus] = useState<SyncStatus>('connecting')
   const cursorRef = useRef(0)
@@ -40,7 +43,7 @@ export function usePollingSync(
     let timer: ReturnType<typeof setTimeout> | undefined
 
     const schedule = () => {
-      if (!stopped) timer = setTimeout(poll, POLL_INTERVAL_MS)
+      if (!stopped) timer = setTimeout(poll, intervalRef?.current ?? POLL_INTERVAL_MS)
     }
 
     const poll = async () => {
