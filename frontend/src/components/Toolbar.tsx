@@ -1,81 +1,34 @@
 import React, { useState } from 'react'
 import { Tool } from '../types'
 
-const I = {
-  pen: (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
-    </svg>
-  ),
-  highlighter: (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m9 11-6 6v3h9l3-3" />
-      <path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4Z" />
-    </svg>
-  ),
-  eraser: (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" />
-      <path d="M22 21H7" />
-      <path d="m5 11 9 9" />
-    </svg>
-  ),
-  rectangle: (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="5" width="18" height="14" rx="2" />
-    </svg>
-  ),
-  circle: (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="12" cy="12" r="9" />
-    </svg>
-  ),
-  line: (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <path d="M5 19 19 5" />
-    </svg>
-  ),
-  undo: (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 7v6h6" />
-      <path d="M21 17a9 9 0 0 0-15-6.7L3 13" />
-    </svg>
-  ),
-  redo: (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 7v6h-6" />
-      <path d="M3 17a9 9 0 0 1 15-6.7L21 13" />
-    </svg>
-  ),
-  trash: (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 6h18" />
-      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-    </svg>
-  ),
-  download: (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-      <path d="m7 10 5 5 5-5" />
-      <path d="M12 15V3" />
-    </svg>
-  ),
-}
+/**
+ * The apparatus rail: a typeset instrument column. No keycaps, no icons —
+ * tools are ledger rows in the mono voice with hairline dividers; the
+ * active row floods with the vermilion spot ink.
+ */
 
-const TOOLS: { id: Tool; icon: React.ReactNode; label: string }[] = [
-  { id: 'pen', icon: I.pen, label: 'Pen' },
-  { id: 'highlighter', icon: I.highlighter, label: 'Highlighter' },
-  { id: 'eraser', icon: I.eraser, label: 'Eraser' },
-  { id: 'rectangle', icon: I.rectangle, label: 'Rectangle' },
-  { id: 'circle', icon: I.circle, label: 'Circle' },
-  { id: 'line', icon: I.line, label: 'Line' },
+const TOOLS: { id: Tool; label: string; hotkey: string }[] = [
+  { id: 'pen', label: 'Pen', hotkey: 'P' },
+  { id: 'highlighter', label: 'Marker', hotkey: 'M' },
+  { id: 'eraser', label: 'Eraser', hotkey: 'E' },
+  { id: 'rectangle', label: 'Rectangle', hotkey: 'R' },
+  { id: 'circle', label: 'Ellipse', hotkey: 'O' },
+  { id: 'line', label: 'Line', hotkey: 'L' },
 ]
 
-const PRESET_COLORS = [
-  '#ffffff', '#ff6b6b', '#ffd93d', '#6bcb77',
-  '#4cc9f0', '#ff8c32', '#7c5cff', '#00c9a7',
+/* Proofing inks — light pigments that read on the dark litho plate. */
+const INKS = [
+  '#f2ede0',
+  '#ff6a3d',
+  '#eab54e',
+  '#6fc7b2',
+  '#7f9cf5',
+  '#f193b4',
+  '#a4d474',
+  '#b9b0a2',
 ]
+
+const NIBS = [1, 3, 6, 10, 16]
 
 interface ToolbarProps {
   tool: Tool
@@ -88,6 +41,7 @@ interface ToolbarProps {
   onRedo: () => void
   onClear: () => void
   onExport: () => void
+  onImage: () => void
   canUndo: boolean
   canRedo: boolean
 }
@@ -103,111 +57,131 @@ const Toolbar: React.FC<ToolbarProps> = ({
   onRedo,
   onClear,
   onExport,
+  onImage,
   canUndo,
   canRedo,
 }) => {
   const [customColor, setCustomColor] = useState(color)
 
   return (
-    <div className="toolbar" role="toolbar" aria-label="Drawing tools">
-      <div className="toolbar-group">
+    <aside className="rail" role="toolbar" aria-label="Drawing apparatus" aria-orientation="vertical">
+      <div className="rail-section">
+        <span className="rail-label" aria-hidden="true">
+          tool
+        </span>
         {TOOLS.map((t) => (
           <button
             key={t.id}
-            className={`tool-btn ${tool === t.id ? 'active' : ''}`}
+            className={`app-row ${tool === t.id ? 'active' : ''}`}
             onClick={() => setTool(t.id)}
-            title={t.label}
-            aria-label={t.label}
+            title={`${t.label} (${t.hotkey})`}
+            aria-label={`${t.label}, hotkey ${t.hotkey}`}
             aria-pressed={tool === t.id}
           >
-            {t.icon}
+            <span className="app-row-name">{t.label}</span>
+            <span className="app-row-key" aria-hidden="true">
+              {t.hotkey}
+            </span>
           </button>
         ))}
       </div>
 
-      <div className="toolbar-divider" />
-
-      <div className="toolbar-group">
-        {PRESET_COLORS.map((c) => (
-          <button
-            key={c}
-            className={`color-swatch ${color === c ? 'active' : ''}`}
-            style={{ backgroundColor: c }}
-            onClick={() => {
-              setColor(c)
-              setCustomColor(c)
-            }}
-            title={c}
-            aria-label={`Color ${c}`}
-            aria-pressed={color === c}
-          />
-        ))}
-        <div className="custom-color-wrap" title="Custom color">
-          <input
-            type="color"
-            value={customColor}
-            onChange={(e) => {
-              setCustomColor(e.target.value)
-              setColor(e.target.value)
-            }}
-            className="custom-color-input"
-            aria-label="Custom color"
-          />
+      <div className="rail-section">
+        <span className="rail-label" aria-hidden="true">
+          ink
+        </span>
+        <div className="ink-grid">
+          {INKS.map((c) => (
+            <button
+              key={c}
+              className={`ink-dot ${color === c ? 'active' : ''}`}
+              onClick={() => {
+                setColor(c)
+                setCustomColor(c)
+              }}
+              title={`Ink ${c}`}
+              aria-label={`Ink color ${c}`}
+              aria-pressed={color === c}
+            >
+              <span className="ink-pigment" style={{ backgroundColor: c }} aria-hidden="true" />
+            </button>
+          ))}
+          <label className="ink-dot ink-custom" title="Mix a custom ink">
+            <span
+              className="ink-pigment ink-pigment-custom"
+              style={{ backgroundColor: customColor }}
+              aria-hidden="true"
+            />
+            <input
+              type="color"
+              value={customColor}
+              onChange={(e) => {
+                setCustomColor(e.target.value)
+                setColor(e.target.value)
+              }}
+              className="ink-custom-input"
+              aria-label="Custom ink color"
+            />
+          </label>
         </div>
       </div>
 
-      <div className="toolbar-divider" />
-
-      <div className="toolbar-group">
-        <label className="width-label">
-          <span className="width-caption">Size</span>
-          <input
-            type="range"
-            min={1}
-            max={20}
-            value={width}
-            onChange={(e) => setWidth(Number(e.target.value))}
-            className="width-slider"
-            aria-label="Stroke size"
-          />
-          <span className="width-value">{width}</span>
-        </label>
+      <div className="rail-section">
+        <span className="rail-label" aria-hidden="true">
+          nib
+        </span>
+        <div className="nib-row" role="group" aria-label="Stroke size">
+          {NIBS.map((n) => (
+            <button
+              key={n}
+              className={`nib-key ${width === n ? 'active' : ''}`}
+              onClick={() => setWidth(n)}
+              title={`Nib size ${n}`}
+              aria-label={`Nib size ${n}`}
+              aria-pressed={width === n}
+            >
+              <span className="nib-dot" style={{ width: 3 + n, height: 3 + n }} aria-hidden="true" />
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="toolbar-divider" />
-
-      <div className="toolbar-group">
-        <button
-          className="tool-btn"
-          onClick={onUndo}
-          disabled={!canUndo}
-          title="Undo"
-          aria-label="Undo"
-        >
-          {I.undo}
+      <div className="rail-section">
+        <span className="rail-label" aria-hidden="true">
+          plate
+        </span>
+        <button className="app-row" onClick={onUndo} disabled={!canUndo} title="Undo (Ctrl+Z)" aria-label="Undo">
+          <span className="app-row-name">Undo</span>
+          <span className="app-row-key" aria-hidden="true">
+            ^Z
+          </span>
         </button>
         <button
-          className="tool-btn"
+          className="app-row"
           onClick={onRedo}
           disabled={!canRedo}
-          title="Redo"
+          title="Redo (Ctrl+Shift+Z)"
           aria-label="Redo"
         >
-          {I.redo}
+          <span className="app-row-name">Redo</span>
+          <span className="app-row-key" aria-hidden="true">
+            ^⇧Z
+          </span>
+        </button>
+        <button className="app-row" onClick={onImage} title="Fix an image onto the plate" aria-label="Place image">
+          <span className="app-row-name">Image</span>
+        </button>
+        <button className="app-row app-row-danger" onClick={onClear} title="Wipe the plate for everyone" aria-label="Wipe plate">
+          <span className="app-row-name">Wipe</span>
         </button>
       </div>
 
-      <div className="toolbar-divider" />
-
-      <div className="toolbar-group">
-        <button className="tool-btn danger" onClick={onClear} title="Clear board" aria-label="Clear board">
-          {I.trash}
-        </button>
-        <button className="tool-btn export-btn" onClick={onExport} title="Export" aria-label="Export board">
-          {I.download}
+      <div className="rail-section rail-end">
+        <button className="export-key" onClick={onExport} aria-label="Export board">
+          pull proof <span aria-hidden="true">→</span>
         </button>
       </div>
-    </div>
+    </aside>
   )
 }
 

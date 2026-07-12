@@ -1,9 +1,10 @@
 import React from 'react'
 import { RemoteCursor } from '../hooks/useLiveblocksRoom'
 
+/** Per-user proofing inks — light pigments that read on the dark plate. */
 const USER_COLORS = [
-  '#ff6b6b', '#ffd93d', '#6bcb77', '#4cc9f0',
-  '#ff8c32', '#7c5cff', '#00c9a7', '#f06595',
+  '#ff6a3d', '#6fc7b2', '#eab54e', '#7f9cf5',
+  '#f193b4', '#a4d474', '#f2ede0', '#b9b0a2',
 ]
 
 function getUserColor(name: string): string {
@@ -14,7 +15,11 @@ function getUserColor(name: string): string {
   return USER_COLORS[Math.abs(hash) % USER_COLORS.length]
 }
 
-/** Live cursors of other participants, driven by Liveblocks presence. */
+/**
+ * Live cursors of other participants, driven by Liveblocks presence.
+ * Each renders as a drafting pointer: a fine crosshair with a name slip
+ * in that artist's ink.
+ */
 const PresenceCursors: React.FC<{ cursors: RemoteCursor[] }> = ({ cursors }) => {
   return (
     <>
@@ -26,14 +31,14 @@ const PresenceCursors: React.FC<{ cursors: RemoteCursor[] }> = ({ cursors }) => 
             className="presence-cursor"
             style={{ left: c.cursor.x, top: c.cursor.y, color }}
           >
-            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <svg className="presence-reticle" viewBox="0 0 28 28" width="24" height="24" aria-hidden="true">
               <path
-                d="M4 2l16 7.5-7 2-3.5 6.5L4 2z"
-                fill="currentColor"
-                stroke="#12101c"
-                strokeWidth="1.2"
-                strokeLinejoin="round"
+                d="M14 2v8M14 18v8M2 14h8M18 14h8"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
               />
+              <circle cx="14" cy="14" r="2" fill="currentColor" />
             </svg>
             <span className="presence-label" style={{ backgroundColor: color }}>
               {c.name}

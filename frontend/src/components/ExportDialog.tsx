@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { exportBoard } from '../api'
 
 interface ExportDialogProps {
@@ -6,18 +6,29 @@ interface ExportDialogProps {
   onClose: () => void
 }
 
+/** Pull a proof: export the plate as SVG / PNG / PDF. */
 const ExportDialog: React.FC<ExportDialogProps> = ({ boardId, onClose }) => {
   const [format, setFormat] = useState('svg')
   const [width, setWidth] = useState(800)
   const [height, setHeight] = useState(600)
   const [loading, setLoading] = useState(false)
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    panelRef.current?.querySelector('button')?.focus()
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
 
   const handleExport = async () => {
     setLoading(true)
     try {
       const result = await exportBoard(boardId, format, width, height)
       if (!result) {
-        alert('Export failed')
+        alert('The proof would not pull — try again.')
         return
       }
       const a = document.createElement('a')
@@ -27,10 +38,10 @@ const ExportDialog: React.FC<ExportDialogProps> = ({ boardId, onClose }) => {
       } else {
         a.href = result as unknown as string
       }
-      a.download = `whiteboard_${boardId}.${format}`
+      a.download = `scribbly_plate_${boardId}.${format}`
       a.click()
     } catch {
-      alert('Export failed')
+      alert('The proof would not pull — try again.')
     } finally {
       setLoading(false)
       onClose()
@@ -40,54 +51,69 @@ const ExportDialog: React.FC<ExportDialogProps> = ({ boardId, onClose }) => {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div
+        ref={panelRef}
         className="modal"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-label="Export board"
       >
-        <h2 className="modal-title">Take it with you</h2>
-        <p className="modal-sub">Download this board as an image.</p>
+        <div className="modal-head">
+          <span className="modal-eyebrow">output № {boardId}</span>
+          <h2 className="modal-title">Pull a proof</h2>
+          <p className="modal-sub">Print this plate to a file.</p>
+        </div>
 
         <div className="modal-field">
-          <label>Format</label>
-          <div className="format-btns">
+          <span className="field-label" id="format-label">
+            stock
+          </span>
+          <div className="format-keys" role="group" aria-labelledby="format-label">
             {(['svg', 'png', 'pdf'] as const).map((f) => (
               <button
                 key={f}
-                className={`format-btn ${format === f ? 'active' : ''}`}
+                className={`format-key ${format === f ? 'active' : ''}`}
                 onClick={() => setFormat(f)}
+                aria-pressed={format === f}
               >
-                {f.toUpperCase()}
+                {f}
               </button>
             ))}
           </div>
         </div>
 
-        <div className="modal-field">
-          <label>Width</label>
-          <input
-            type="number"
-            value={width}
-            onChange={(e) => setWidth(Number(e.target.value))}
-            className="modal-input"
-          />
-        </div>
-
-        <div className="modal-field">
-          <label>Height</label>
-          <input
-            type="number"
-            value={height}
-            onChange={(e) => setHeight(Number(e.target.value))}
-            className="modal-input"
-          />
+        <div className="modal-dims">
+          <label className="modal-field">
+            <span className="field-label">width</span>
+            <input
+              type="number"
+              min={1}
+              value={width}
+              onChange={(e) => setWidth(Number(e.target.value))}
+              className="modal-input"
+            />
+          </label>
+          <span className="dims-x" aria-hidden="true">
+            ×
+          </span>
+          <label className="modal-field">
+            <span className="field-label">height</span>
+            <input
+              type="number"
+              min={1}
+              value={height}
+              onChange={(e) => setHeight(Number(e.target.value))}
+              className="modal-input"
+            />
+          </label>
         </div>
 
         <div className="modal-actions">
-          <button className="modal-btn cancel" onClick={onClose}>Cancel</button>
-          <button className="modal-btn primary" onClick={handleExport} disabled={loading}>
-            {loading ? 'Exporting...' : 'Download'}
+          <button className="modal-cancel" onClick={onClose}>
+            cancel
+          </button>
+          <button className="modal-go" onClick={handleExport} disabled={loading}>
+            {loading ? 'pulling…' : 'pull proof →'}
           </button>
         </div>
       </div>

@@ -14,6 +14,14 @@ interface SessionTimelineProps {
   onEventSeek: (index: number) => void
 }
 
+function pad4(n: number): string {
+  return String(Math.max(0, n)).padStart(4, '0')
+}
+
+/**
+ * The proof reel: play/scrub the plate's entire stroke log like a strip of
+ * proofs. Scrubbing pauses live sync upstream (via the replaying flag).
+ */
 const SessionTimeline: React.FC<SessionTimelineProps> = ({
   events,
   onReplayEvent,
@@ -22,6 +30,9 @@ const SessionTimeline: React.FC<SessionTimelineProps> = ({
   const [playing, setPlaying] = useState(false)
   const [speed, setSpeed] = useState(1)
   const [currentIndex, setCurrentIndex] = useState(-1)
+  // Mirrors currentIndex so the play interval can advance + fire replay
+  // callbacks outside React's render phase (no setState-in-render).
+  const indexRef = useRef(-1)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const stop = useCallback(() => {
@@ -44,89 +55,99 @@ const SessionTimeline: React.FC<SessionTimelineProps> = ({
     if (events.length === 0) return
 
     setPlaying(true)
-    const startFrom = currentIndex < 0 ? 0 : currentIndex
-
     intervalRef.current = setInterval(() => {
-      setCurrentIndex((prev) => {
-        const next = prev + 1
-        if (next >= events.length) {
-          stop()
-          return prev
-        }
-        onReplayEvent(events[next] as unknown as Record<string, unknown>)
-        return next
-      })
+      const next = indexRef.current + 1
+      if (next >= events.length) {
+        stop()
+        return
+      }
+      indexRef.current = next
+      onReplayEvent(events[next] as unknown as Record<string, unknown>)
+      setCurrentIndex(next)
     }, 200 / speed)
   }
 
   const handleScrub = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = Number(e.target.value)
+    indexRef.current = val
     setCurrentIndex(val)
     onEventSeek(val)
   }
 
   const reset = () => {
     stop()
+    indexRef.current = -1
     setCurrentIndex(-1)
     onEventSeek(-1)
   }
 
+  const atLive = currentIndex < 0 || currentIndex >= events.length - 1
+
   return (
-    <div className="session-timeline">
-      <span className="timeline-label" title="Replay every stroke ever drawn on this board">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="9" />
-          <path d="M12 7v5l3 3" />
-        </svg>
-        Replay
+    <footer className="transport" aria-label="Proof reel replay">
+      <span className="transport-label" title="Replay every stroke ever drawn on this plate">
+        proof reel
       </span>
+
       <button
-        className="timeline-btn play"
+        className={`transport-key ${playing ? 'active' : ''}`}
         onClick={togglePlay}
-        title={playing ? 'Pause' : 'Play'}
+        title={playing ? 'Pause replay' : 'Play replay'}
         aria-label={playing ? 'Pause replay' : 'Play replay'}
       >
         {playing ? (
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
-            <rect x="6" y="5" width="4" height="14" rx="1" />
-            <rect x="14" y="5" width="4" height="14" rx="1" />
+          <svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor" aria-hidden="true">
+            <rect x="6" y="4" width="4" height="16" />
+            <rect x="14" y="4" width="4" height="16" />
           </svg>
         ) : (
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
-            <path d="M8 5.5v13a1 1 0 0 0 1.5.9l11-6.5a1 1 0 0 0 0-1.8l-11-6.5A1 1 0 0 0 8 5.5Z" />
+          <svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor" aria-hidden="true">
+            <path d="M7 4.5v15l13-7.5L7 4.5Z" />
           </svg>
         )}
       </button>
-      <button className="timeline-btn" onClick={reset} title="Reset" aria-label="Reset replay">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
-          <rect x="6" y="6" width="12" height="12" rx="2" />
+
+      <button className="transport-key" onClick={reset} title="Back to live" aria-label="Reset replay to live">
+        <svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor" aria-hidden="true">
+          <rect x="5" y="5" width="14" height="14" />
         </svg>
       </button>
-      <div className="speed-btns">
+
+      <div className="speed-block" role="group" aria-label="Replay speed">
         {[0.5, 1, 2].map((s) => (
           <button
             key={s}
-            className={`speed-btn ${speed === s ? 'active' : ''}`}
+            className={`speed-key ${speed === s ? 'active' : ''}`}
             onClick={() => setSpeed(s)}
             aria-pressed={speed === s}
+            aria-label={`Replay speed ${s}x`}
           >
-            {s}x
+            {s}×
           </button>
         ))}
       </div>
+
       <input
         type="range"
-        className="timeline-scrubber"
+        className="tape-scrubber"
         min={-1}
         max={events.length - 1}
         value={currentIndex}
         onChange={handleScrub}
         aria-label="Scrub through drawing history"
+        aria-valuetext={`Frame ${currentIndex + 1} of ${events.length}`}
       />
-      <span className="timeline-time">
-        {currentIndex >= 0 ? currentIndex + 1 : 0} / {events.length}
+
+      <span className="tape-counter" aria-hidden="true">
+        fr {pad4(currentIndex >= 0 ? currentIndex + 1 : 0)}
+        <em>/</em>
+        {pad4(events.length)}
       </span>
-    </div>
+
+      <span className={`tape-mode ${atLive && !playing ? 'live' : 'replay'}`} aria-hidden="true">
+        {atLive && !playing ? 'live' : 'replay'}
+      </span>
+    </footer>
   )
 }
 

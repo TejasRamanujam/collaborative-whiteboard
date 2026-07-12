@@ -7,7 +7,7 @@ import ExportDialog from './components/ExportDialog'
 import PresenceCursors from './components/PresenceCursors'
 import { usePollingSync } from './hooks/usePollingSync'
 import { useLiveblocksRoom, BoardRoomEvent } from './hooks/useLiveblocksRoom'
-import { fetchBoards, createBoard, deleteBoard, fetchBoard } from './api'
+import { fetchBoards, createBoard, deleteBoard, fetchBoard, uploadImage } from './api'
 import { Stroke, Tool, Board } from './types'
 import { ReplayEvent } from './components/SessionTimeline'
 import './App.css'
@@ -31,21 +31,13 @@ function getUserId(): string {
   return id
 }
 
-function Squiggle() {
-  return (
-    <svg className="squiggle" viewBox="0 0 220 14" aria-hidden="true">
-      <path
-        d="M3 10 C 25 2, 45 2, 65 9 S 105 14, 125 7 S 165 1, 185 8 S 210 12, 217 6"
-        fill="none"
-        stroke="var(--accent)"
-        strokeWidth="4"
-        strokeLinecap="round"
-      />
-    </svg>
-  )
+function pad(n: number, w = 2): string {
+  return String(Math.max(0, n)).padStart(w, '0')
 }
 
-function BoardList() {
+/* ============================ THE LEDGER ============================ */
+
+function BoardIndex() {
   const navigate = useNavigate()
   const [boards, setBoards] = useState<Board[]>([])
   const [name, setName] = useState('')
@@ -53,8 +45,9 @@ function BoardList() {
   const [creating, setCreating] = useState(false)
 
   useEffect(() => {
+    document.title = 'Scribbly — The Proof Room'
     fetchBoards()
-      .then(setBoards)
+      .then((bs) => Array.isArray(bs) && setBoards(bs))
       .finally(() => setLoading(false))
   }, [])
 
@@ -72,156 +65,147 @@ function BoardList() {
   }
 
   const handleDelete = async (b: Board) => {
-    if (!window.confirm(`Delete "${b.name}" and all its strokes? This cannot be undone.`)) return
+    if (
+      !window.confirm(
+        `Strike plate "${b.name}" from the ledger, with its entire stroke log? This cannot be undone.`
+      )
+    )
+      return
     try {
       await deleteBoard(b.id)
       setBoards((prev) => prev.filter((x) => x.id !== b.id))
     } catch {
-      window.alert('Could not delete the board — try again.')
+      window.alert('Could not strike the plate — try again.')
     }
   }
 
   return (
-    <div className="board-list-page">
-      <div className="board-list">
-        <a className="back-pill" href="https://tejas-live-demos.vercel.app">
-          <span aria-hidden="true">←</span> Back to demos
-        </a>
-
-        <header className="hero">
-          <div className="hero-mark" aria-hidden="true">
-            <svg viewBox="0 0 64 64" width="44" height="44">
-              <rect x="4" y="4" width="56" height="56" rx="14" fill="var(--accent)" />
-              <path
-                d="M16 42c6-14 10-20 14-20s2 12 6 12 6-8 12-10"
-                fill="none"
-                stroke="#fff"
-                strokeWidth="5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <circle cx="46" cy="45" r="4" fill="var(--cyan)" />
-            </svg>
-          </div>
-          <h1>
-            Scribbly
-            <Squiggle />
-          </h1>
-          <p className="subtitle">
-            A whiteboard that remembers. Every stroke is saved — scrub the timeline to
-            watch your doodles come back to life.
-          </p>
+    <div className="index-page">
+      <div className="index-frame">
+        <header className="index-topbar">
+          <a className="demos-link" href="https://tejas-live-demos.vercel.app">
+            ← Back to demos
+          </a>
+          <span className="topbar-tag" aria-hidden="true">
+            the proof room · est. every stroke on file
+          </span>
         </header>
+
+        <section className="hero" aria-labelledby="hero-title">
+          <h1 id="hero-title" className="wordmark">
+            Scribbly<span className="wordmark-tick" aria-hidden="true">*</span>
+          </h1>
+          <p className="hero-sub">
+            A shared drawing plate. Every stroke is broadcast live to everyone at the
+            bench, filed in a permanent log, and replayable like a proof reel.
+          </p>
+          <p className="hero-annot" aria-label="Capabilities">
+            realtime sync <span aria-hidden="true">·</span> live cursors{' '}
+            <span aria-hidden="true">·</span> proof-reel replay
+          </p>
+        </section>
 
         <div className="create-row">
           <input
             className="create-input"
-            placeholder="Name a new board — “rocket ideas”, “lunch doodles”…"
+            placeholder="Title a new plate…"
             value={name}
+            maxLength={60}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
             aria-label="New board name"
           />
-          <button
-            className="btn btn-primary"
-            onClick={handleCreate}
-            disabled={creating || !name.trim()}
-          >
-            {creating ? 'Creating…' : '+ Create'}
+          <button className="create-btn" onClick={handleCreate} disabled={creating || !name.trim()}>
+            {creating ? 'cutting…' : 'cut plate'}
           </button>
+        </div>
+
+        <div className="board-list-head" aria-hidden="true">
+          <span>№</span>
+          <span>plate</span>
+          <span className="head-date">cut</span>
         </div>
 
         {loading && (
           <div className="board-skeletons" aria-hidden="true">
-            <div className="skeleton-card" />
-            <div className="skeleton-card" />
-            <div className="skeleton-card" />
+            <div className="skeleton-row" />
+            <div className="skeleton-row" />
+            <div className="skeleton-row" />
           </div>
         )}
 
-        {!loading &&
-          boards.map((b) => (
-            <div key={b.id} className="board-card-wrap">
-              <button
-                className="board-card"
-                onClick={() => navigate(`/board/${b.id}`)}
+        {!loading && (
+          <ul className="board-list">
+            {boards.map((b, i) => (
+              <li
+                key={b.id}
+                className="board-row"
+                style={{ '--i': i } as React.CSSProperties}
               >
-                <span className="board-doodle" aria-hidden="true">
-                  <svg viewBox="0 0 40 40" width="22" height="22">
-                    <path
-                      d="M8 28c4-10 7-16 10-16s2 9 5 9 4-6 9-8"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="3.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </span>
-                <span className="board-meta">
+                <button className="board-open" onClick={() => navigate(`/board/${b.id}`)}>
+                  <span className="board-no" aria-hidden="true">
+                    № {pad(b.id)}
+                  </span>
                   <span className="board-name">{b.name}</span>
                   <span className="board-date">
-                    {b.created_at ? new Date(b.created_at).toLocaleString() : ''}
+                    {b.created_at
+                      ? new Date(b.created_at).toLocaleDateString(undefined, {
+                          year: '2-digit',
+                          month: 'short',
+                          day: '2-digit',
+                        })
+                      : '—'}
                   </span>
-                </span>
-                <span className="board-arrow" aria-hidden="true">
-                  →
-                </span>
-              </button>
-              <button
-                className="board-delete"
-                aria-label={`Delete board ${b.name}`}
-                title="Delete board"
-                onClick={() => handleDelete(b)}
-              >
-                <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
-                  <path
-                    d="M4 7h16M10 4h4M7 7l1 13h8l1-13M10 11v6M14 11v6"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
-            </div>
-          ))}
+                  <span className="board-go" aria-hidden="true">
+                    open →
+                  </span>
+                </button>
+                <button
+                  className="board-delete"
+                  aria-label={`Delete board ${b.name}`}
+                  title="Strike this plate from the ledger"
+                  onClick={() => handleDelete(b)}
+                >
+                  ✕
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
 
         {!loading && boards.length === 0 && (
           <div className="empty-state">
-            <svg viewBox="0 0 120 80" width="120" height="80" aria-hidden="true">
-              <rect
-                x="8"
-                y="8"
-                width="104"
-                height="64"
-                rx="12"
-                fill="none"
-                stroke="var(--border-strong)"
-                strokeWidth="3"
-                strokeDasharray="7 8"
-                strokeLinecap="round"
-              />
-              <path
-                d="M32 52c8-18 14-26 20-24s0 16 8 16 8-10 16-12"
-                fill="none"
-                stroke="var(--accent)"
-                strokeWidth="4"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                opacity="0.7"
-              />
-              <circle cx="86" cy="54" r="4" fill="var(--cyan)" opacity="0.8" />
-            </svg>
-            <p className="empty-title">A blank page, full of possibility</p>
-            <p className="empty-hint">Name your first board above and start scribbling.</p>
+            <div className="empty-plate" aria-hidden="true">
+              <svg viewBox="0 0 120 64" width="120" height="64">
+                <path
+                  d="M14 46c9-22 15-32 22-30s1 18 10 18 10-12 22-14"
+                  fill="none"
+                  stroke="var(--plate-soft)"
+                  strokeWidth="4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <circle cx="88" cy="44" r="3.5" fill="var(--verm)" />
+              </svg>
+            </div>
+            <p className="empty-title">Nothing in the ledger</p>
+            <p className="empty-hint">Title a plate above and pull the first proof.</p>
           </div>
         )}
+
+        <footer className="index-footer">
+          <span>scribbly</span>
+          <span aria-hidden="true">·</span>
+          <span>the proof room</span>
+          <span aria-hidden="true">·</span>
+          <span>every stroke on file</span>
+        </footer>
       </div>
     </div>
   )
 }
+
+/* ============================ THE PRESS ============================ */
 
 /** Apply a batch of stroke events to a strokes array (idempotent). */
 function applyEventsToStrokes(base: Stroke[], evs: ReplayEvent[]): Stroke[] {
@@ -243,23 +227,23 @@ function applyEventsToStrokes(base: Stroke[], evs: ReplayEvent[]): Stroke[] {
 const SYNC_META = {
   realtime: {
     cls: 'realtime',
-    label: 'Live · realtime',
+    label: 'realtime',
     title: 'Connected in realtime — strokes and cursors appear instantly',
   },
   live: {
     cls: 'live',
-    label: 'Live · syncing',
-    title: 'Synced with everyone on this board every few seconds',
+    label: 'syncing',
+    title: 'Synced with everyone at this bench every few seconds',
   },
   connecting: {
     cls: 'connecting',
-    label: 'Connecting…',
-    title: 'Reaching the board server',
+    label: 'linking…',
+    title: 'Reaching the press',
   },
   offline: {
     cls: 'offline',
-    label: 'Offline · retrying',
-    title: 'Can’t reach the server right now — new strokes stay local until it’s back',
+    label: 'offline',
+    title: 'Can’t reach the press right now — new strokes stay local until it’s back',
   },
 } as const
 
@@ -271,11 +255,12 @@ function Whiteboard() {
 
   const [strokes, setStrokes] = useState<Stroke[]>([])
   const [tool, setTool] = useState<Tool>('pen')
-  const [color, setColor] = useState('#ffffff')
+  const [color, setColor] = useState('#f2ede0')
   const [width, setWidth] = useState(3)
   const [showExport, setShowExport] = useState(false)
   const [events, setEvents] = useState<ReplayEvent[]>([])
   const [boardLoading, setBoardLoading] = useState(true)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Per-user undo/redo: the stacks hold this client's own strokes only, so
   // undoing never deletes another participant's work on the shared board.
@@ -285,7 +270,11 @@ function Whiteboard() {
   // replay view isn't stomped by live updates.
   const replayingRef = useRef(false)
 
-  const [boardName, setBoardName] = useState('Whiteboard')
+  const [boardName, setBoardName] = useState('Plate')
+
+  useEffect(() => {
+    document.title = `${boardName} — Scribbly`
+  }, [boardName])
 
   // Remote events arriving from the polling loop. The first batch (and any
   // post-replay resync, reset === true) rebuilds state from the full log;
@@ -367,12 +356,12 @@ function Whiteboard() {
     undoStackRef.current = []
     redoStackRef.current = []
     fetchBoard(boardId).then((b) => {
-      if (b) setBoardName(b.name || 'Whiteboard')
+      if (b) setBoardName(b.name || 'Plate')
     })
   }, [boardId])
 
   // The board is "loaded" once the first poll answers (the full event log
-  // rebuilds the drawing) — or fails, in which case we show the offline pill.
+  // rebuilds the drawing) — or fails, in which case we show the offline note.
   useEffect(() => {
     if (syncStatus !== 'connecting') setBoardLoading(false)
   }, [syncStatus])
@@ -426,12 +415,45 @@ function Whiteboard() {
 
   // Clearing wipes the shared board for everyone and is not undoable.
   const handleClear = useCallback(() => {
+    if (!window.confirm('Wipe the plate for everyone? The proof reel keeps the history.')) return
     replayingRef.current = false
     undoStackRef.current = []
     redoStackRef.current = []
     setStrokes([])
     emitEvent('clear', {})
   }, [emitEvent])
+
+  // Image upload: the backend appends an 'add' event with the image stroke;
+  // we apply the returned stroke locally + broadcast so peers see it now
+  // (the polling reconciliation dedupes by stroke id later).
+  const handleImagePick = useCallback(() => fileInputRef.current?.click(), [])
+  const handleImageFile = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0]
+      e.target.value = ''
+      if (!file || boardId === null) return
+      try {
+        const res = await uploadImage(boardId, file)
+        const stroke = res?.stroke as Stroke | undefined
+        if (stroke && stroke.id) {
+          replayingRef.current = false
+          setStrokes((prev) =>
+            applyEventsToStrokes(prev, [
+              { event_type: 'add', stroke_data: stroke } as unknown as ReplayEvent,
+            ])
+          )
+          broadcast({
+            event_type: 'add',
+            stroke_data: stroke as unknown as Record<string, unknown>,
+            user_id: userId,
+          })
+        }
+      } catch {
+        window.alert('The image would not take — try a smaller file.')
+      }
+    },
+    [boardId, broadcast, userId]
+  )
 
   const handleReplayEvent = useCallback((event: Record<string, unknown>) => {
     replayingRef.current = true
@@ -446,43 +468,71 @@ function Whiteboard() {
     [events]
   )
 
+  // Tool hotkeys — documented in the apparatus rail. Skipped while typing.
+  useEffect(() => {
+    const keys: Record<string, Tool> = {
+      p: 'pen',
+      m: 'highlighter',
+      e: 'eraser',
+      r: 'rectangle',
+      o: 'circle',
+      l: 'line',
+    }
+    const onKey = (ev: KeyboardEvent) => {
+      const t = ev.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      if (ev.metaKey || ev.ctrlKey) {
+        if (ev.key.toLowerCase() === 'z') {
+          ev.preventDefault()
+          if (ev.shiftKey) handleRedo()
+          else handleUndo()
+        }
+        return
+      }
+      const tool = keys[ev.key.toLowerCase()]
+      if (tool) setTool(tool)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [handleUndo, handleRedo])
+
   const sync = SYNC_META[rtConnected ? 'realtime' : syncStatus]
+  const peers = remoteCursors.length
 
   return (
-    <div className="app">
-      <div className="app-header">
-        <div className="header-left">
-          <button className="btn back-btn" onClick={() => navigate('/')}>
-            <span aria-hidden="true">←</span> Boards
+    <div className="deck">
+      <header className="deck-top">
+        <div className="deck-top-left">
+          <button className="back-key" onClick={() => navigate('/')} aria-label="Back to the ledger">
+            ← index
           </button>
-          <h1 className="board-title">{boardName}</h1>
+          <div className="board-id-block">
+            <span className="board-no-chip" aria-hidden="true">
+              plate № {boardId !== null ? pad(boardId) : '--'}
+            </span>
+            <h1 className="deck-title">{boardName}</h1>
+          </div>
         </div>
-        <div className="header-actions">
-          <span className={`sync-pill ${sync.cls}`} title={sync.title}>
+        <div className="deck-top-right">
+          {peers > 0 && (
+            <span
+              className="peers-chip"
+              title={`${peers} other ${peers === 1 ? 'person' : 'people'} drawing at this bench now`}
+            >
+              {peers} at the bench
+            </span>
+          )}
+          <span className={`sync-module ${sync.cls}`} title={sync.title} role="status">
             <span className="sync-dot" aria-hidden="true" />
             {sync.label}
           </span>
-          <span className="user-badge" title="Your doodle identity on this board">
-            {userId}
+          <span className="user-chip" title="Your mark in the log">
+            you · {userId}
           </span>
         </div>
-      </div>
+      </header>
 
-      <div
-        className="board-area"
-        onPointerMove={handlePointerMove}
-        onPointerLeave={handlePointerLeave}
-      >
-        <Canvas
-          strokes={strokes}
-          tool={tool}
-          color={color}
-          width={width}
-          onStrokeAdd={handleStrokeAdd}
-          onStrokeUpdate={handleStrokeUpdate}
-          onStrokeEnd={handleStrokeEnd}
-        />
-        <PresenceCursors cursors={remoteCursors} />
+      <div className="deck-mid">
         <Toolbar
           tool={tool}
           setTool={setTool}
@@ -494,38 +544,64 @@ function Whiteboard() {
           onRedo={handleRedo}
           onClear={handleClear}
           onExport={() => setShowExport(true)}
+          onImage={handleImagePick}
           canUndo={undoStackRef.current.length > 0}
           canRedo={redoStackRef.current.length > 0}
         />
-        {boardLoading && (
-          <div className="board-loading" role="status">
-            <span className="board-loading-dot" />
-            <span className="board-loading-dot" />
-            <span className="board-loading-dot" />
-            <span className="board-loading-text">Fetching your strokes…</span>
+
+        <div className="press-bed">
+          <div
+            className="board-area"
+            onPointerMove={handlePointerMove}
+            onPointerLeave={handlePointerLeave}
+          >
+            <Canvas
+              strokes={strokes}
+              tool={tool}
+              color={color}
+              width={width}
+              onStrokeAdd={handleStrokeAdd}
+              onStrokeUpdate={handleStrokeUpdate}
+              onStrokeEnd={handleStrokeEnd}
+            />
+            <PresenceCursors cursors={remoteCursors} />
+            {boardLoading && (
+              <div className="board-loading" role="status">
+                reading the log
+                <span className="loading-dots" aria-hidden="true">
+                  <i>.</i>
+                  <i>.</i>
+                  <i>.</i>
+                </span>
+              </div>
+            )}
+            {!boardLoading && strokes.length === 0 && (
+              <div className="canvas-hint" aria-hidden="true">
+                blank plate — make a mark
+              </div>
+            )}
           </div>
-        )}
-        {!boardLoading && strokes.length === 0 && (
-          <div className="canvas-hint" aria-hidden="true">
-            <svg viewBox="0 0 90 60" width="72" height="48">
-              <path
-                d="M12 44c8-20 14-30 22-28s0 18 10 18 10-12 22-14"
-                fill="none"
-                stroke="var(--text-faint)"
-                strokeWidth="4"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            <span>Grab a pen and make a mark</span>
+          <div className="plate-caption" aria-hidden="true">
+            <span>plate № {boardId !== null ? pad(boardId) : '--'} · dark litho stone</span>
+            <span>every stroke filed to the log</span>
           </div>
-        )}
+        </div>
       </div>
 
       <SessionTimeline
         events={events}
         onReplayEvent={handleReplayEvent}
         onEventSeek={handleEventSeek}
+      />
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleImageFile}
+        style={{ display: 'none' }}
+        aria-hidden="true"
+        tabIndex={-1}
       />
 
       {showExport && boardId !== null && (
@@ -538,7 +614,7 @@ function Whiteboard() {
 function App() {
   return (
     <Routes>
-      <Route path="/" element={<BoardList />} />
+      <Route path="/" element={<BoardIndex />} />
       <Route path="/board/:boardId" element={<Whiteboard />} />
     </Routes>
   )
