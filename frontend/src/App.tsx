@@ -270,6 +270,18 @@ function Whiteboard() {
   const replayingRef = useRef(false)
 
   const [boardName, setBoardName] = useState('Plate')
+  const [autoReplay, setAutoReplay] = useState(false)
+
+  // Replay a well-stocked board once per session on first open, so the
+  // timeline feature shows itself.
+  useEffect(() => {
+    if (boardLoading || boardId === null || events.length < 20) return
+    const key = `scribbly-autoplayed-${boardId}`
+    if (!sessionStorage.getItem(key)) {
+      sessionStorage.setItem(key, '1')
+      setAutoReplay(true)
+    }
+  }, [boardLoading, boardId, events.length])
 
   useEffect(() => {
     document.title = `${boardName} — Scribbly`
@@ -558,6 +570,7 @@ function Whiteboard() {
         events={events}
         onReplayEvent={handleReplayEvent}
         onEventSeek={handleEventSeek}
+        autoplay={autoReplay}
       />
 
       {showExport && boardId !== null && (

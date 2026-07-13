@@ -12,6 +12,8 @@ interface SessionTimelineProps {
   events: ReplayEvent[]
   onReplayEvent: (event: Record<string, unknown>) => void
   onEventSeek: (index: number) => void
+  /** Start one replay pass automatically (first visit to a seeded board). */
+  autoplay?: boolean
 }
 
 function pad4(n: number): string {
@@ -26,6 +28,7 @@ const SessionTimeline: React.FC<SessionTimelineProps> = ({
   events,
   onReplayEvent,
   onEventSeek,
+  autoplay,
 }) => {
   const [playing, setPlaying] = useState(false)
   const [speed, setSpeed] = useState(1)
@@ -75,6 +78,13 @@ const SessionTimeline: React.FC<SessionTimelineProps> = ({
       setCurrentIndex(next)
     }, 200 / speed)
   }
+
+  // One automatic replay pass when a seeded board is first opened.
+  useEffect(() => {
+    if (!autoplay || playing || events.length === 0) return
+    togglePlay()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoplay])
 
   const handleScrub = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = Number(e.target.value)
