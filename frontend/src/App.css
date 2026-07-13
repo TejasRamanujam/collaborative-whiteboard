@@ -792,11 +792,15 @@
 
 /* ---------- the timeline ---------- */
 
-/* Liveblocks' floating badge is injected at runtime bottom-right; nudge it
-   down so it sits inside the transport strip (the space reserved by the
-   transport's right padding) instead of covering the rule line above it. */
-a[href*="liveblocks.io"] {
-  bottom: 7px !important;
+/* Liveblocks' floating badge: a fixed <div> injected at runtime whose
+   anchor points at lblcks.io. Its inline style pins it over the transport's
+   top rule line; drop and shrink it so it sits inside the transport strip
+   (the space reserved by the transport's right padding). */
+div:has(> a[href*="lblcks.io"]) {
+  bottom: 2px !important;
+  right: 10px !important;
+  transform: scale(0.85);
+  transform-origin: bottom right;
 }
 
 .transport {
