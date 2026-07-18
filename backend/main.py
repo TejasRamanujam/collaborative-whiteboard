@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, UploadFile, File, Query
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, UploadFile, File, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -16,15 +16,30 @@ from database import get_db, SessionLocal
 from models import Board, StrokeEvent
 from handlers import board_manager
 from export import export_svg, export_png, export_pdf
+from protection import is_protected_board, merge_additive_strokes, mutation_allowed
 
 app = FastAPI(title="Collaborative Whiteboard")
 
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
+
+
+def is_protected(board: Board) -> bool:
+    return is_protected_board(board.id)
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[
+        origin.strip()
+        for origin in os.environ.get(
+            "ALLOWED_ORIGINS",
+            "https://scribbly-collab.vercel.app,http://localhost:5173",
+        ).split(",")
+        if origin.strip()
+    ],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type"],
 )
 
 
@@ -37,6 +52,7 @@ def list_boards(db: Session = Depends(get_db)):
             "name": b.name,
             "created_at": b.created_at.isoformat() if b.created_at else None,
             "strokes": b.strokes or [],
+            "protected": is_protected(b),
         }
         for b in boards
     ]
@@ -59,9 +75,11 @@ def create_board(name: str = "Untitled", db: Session = Depends(get_db)):
 
 @app.delete("/api/boards/{board_id}")
 def delete_board(board_id: int, db: Session = Depends(get_db)):
-    board = db.query(Board).filter(Board.id == board_id).first()
+    board = db.query(Board).filter(Board.id == board_id).with_for_update().first()
     if not board:
         return Response(content='{"error":"not found"}', status_code=404, media_type="application/json")
+    if is_protected(board):
+        raise HTTPException(status_code=403, detail="Curated showcase plates cannot be deleted")
     db.query(StrokeEvent).filter(StrokeEvent.board_id == board_id).delete()
     db.delete(board)
     db.commit()
@@ -82,6 +100,7 @@ def get_board(board_id: int, db: Session = Depends(get_db)):
         "name": board.name,
         "created_at": board.created_at.isoformat() if board.created_at else None,
         "strokes": board.strokes or [],
+        "protected": is_protected(board),
     }
 
 
@@ -96,6 +115,21 @@ def save_strokes(board_id: int, body: StrokesUpdate, db: Session = Depends(get_d
     board = db.query(Board).filter(Board.id == board_id).first()
     if not board:
         return Response(content='{"error":"not found"}', status_code=404, media_type="application/json")
+    if is_protected(board):
+        merged, added = merge_additive_strokes(board.strokes, body.strokes)
+        board.strokes = merged
+        board_manager.set_strokes(board_id, merged)
+        for stroke in added:
+            db.add(
+                StrokeEvent(
+                    board_id=board_id,
+                    user_id=str(stroke.get("user_id", "rest")),
+                    event_type="add",
+                    stroke_data=stroke,
+                )
+            )
+        db.commit()
+        return {"ok": True, "count": len(merged), "added": len(added), "protected": True}
     board.strokes = body.strokes
     board_manager.set_strokes(board_id, body.strokes)
     # Keep the session timeline in sync with the saved strokes: one "add" event
@@ -177,6 +211,16 @@ def create_event(board_id: int, body: EventCreate, db: Session = Depends(get_db)
     if not board:
         return Response(content='{"error":"not found"}', status_code=404, media_type="application/json")
 
+    strokes = [s for s in (board.strokes or []) if isinstance(s, dict)]
+    sid = (body.stroke_data or {}).get("id")
+    if is_protected(board):
+        if not mutation_allowed(board.id, body.event_type):
+            raise HTTPException(status_code=403, detail="Curated plates accept additive marks only")
+        if sid is None:
+            raise HTTPException(status_code=422, detail="A stroke id is required")
+        if any(stroke.get("id") == sid for stroke in strokes):
+            raise HTTPException(status_code=409, detail="Curated strokes cannot be replaced")
+
     event = StrokeEvent(
         board_id=board_id,
         user_id=body.user_id,
@@ -185,8 +229,6 @@ def create_event(board_id: int, body: EventCreate, db: Session = Depends(get_db)
     )
     db.add(event)
 
-    strokes = [s for s in (board.strokes or []) if isinstance(s, dict)]
-    sid = (body.stroke_data or {}).get("id")
     if body.event_type in ("add", "update") and sid is not None:
         strokes = [s for s in strokes if s.get("id") != sid]
         strokes.append(body.stroke_data)
@@ -232,7 +274,11 @@ def export_board(
 
 @app.post("/api/boards/{board_id}/image")
 async def upload_image(board_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
-    contents = await file.read()
+    if not (file.content_type or "").startswith("image/"):
+        raise HTTPException(status_code=415, detail="Only image uploads are supported")
+    contents = await file.read(MAX_IMAGE_BYTES + 1)
+    if len(contents) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image exceeds the 5 MB demo limit")
     import base64
     import os
 
@@ -304,13 +350,31 @@ async def websocket_endpoint(ws: WebSocket, board_id: int, user_id: str = Query(
 
                 db = SessionLocal()
                 try:
+                    board = db.query(Board).filter(Board.id == board_id).with_for_update().first()
+                    if not board:
+                        await ws.send_text(json.dumps({"type": "error", "error": "board_not_found"}))
+                        continue
+                    strokes = [s for s in (board.strokes or []) if isinstance(s, dict)]
+                    event_type = msg_type.replace("stroke_", "")
+                    if not mutation_allowed(board.id, event_type):
+                        await ws.send_text(
+                            json.dumps({"type": "error", "error": "curated_plate_additive_only"})
+                        )
+                        continue
+                    if is_protected(board) and any(s.get("id") == data.get("id") for s in strokes):
+                        await ws.send_text(
+                            json.dumps({"type": "error", "error": "curated_stroke_immutable"})
+                        )
+                        continue
                     event = StrokeEvent(
                         board_id=board_id,
                         user_id=user_id,
-                        event_type=msg_type.replace("stroke_", ""),
+                        event_type=event_type,
                         stroke_data=data,
                     )
                     db.add(event)
+                    if is_protected(board):
+                        board.strokes = [*strokes, data]
                     db.commit()
                 finally:
                     db.close()

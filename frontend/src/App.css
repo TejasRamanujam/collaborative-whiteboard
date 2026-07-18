@@ -271,6 +271,18 @@
   color: var(--paper);
   background: var(--verm);
 }
+.board-protected {
+  flex: none;
+  width: 54px;
+  display: grid;
+  place-items: center;
+  border-left: 1px solid var(--rule-soft);
+  color: var(--verm);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
 
 /* skeletons + empty */
 

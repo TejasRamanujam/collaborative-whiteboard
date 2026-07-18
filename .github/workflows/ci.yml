@@ -15,3 +15,5 @@ jobs:
         with: { python-version: '3.12' }
       - name: Syntax-check backend
         run: python -m compileall backend api
+      - name: Test curated-state protection
+        run: python -m unittest backend.test_protection

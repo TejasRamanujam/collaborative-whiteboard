@@ -23,6 +23,7 @@ export interface Board {
   name: string
   created_at: string
   strokes: Stroke[]
+  protected?: boolean
 }
 
 export interface CursorPosition {

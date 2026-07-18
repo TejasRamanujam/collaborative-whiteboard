@@ -43,6 +43,7 @@ interface ToolbarProps {
   onExport: () => void
   canUndo: boolean
   canRedo: boolean
+  protectedBoard?: boolean
 }
 
 const Toolbar: React.FC<ToolbarProps> = ({
@@ -58,6 +59,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
   onExport,
   canUndo,
   canRedo,
+  protectedBoard = false,
 }) => {
   const [customColor, setCustomColor] = useState(color)
 
@@ -75,6 +77,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
             title={`${t.label} (${t.hotkey})`}
             aria-label={`${t.label}, hotkey ${t.hotkey}`}
             aria-pressed={tool === t.id}
+            disabled={protectedBoard && t.id === 'eraser'}
           >
             <span className="app-row-name">{t.label}</span>
             <span className="app-row-key" aria-hidden="true">
@@ -148,7 +151,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
         <span className="rail-label" aria-hidden="true">
           plate
         </span>
-        <button className="app-row" onClick={onUndo} disabled={!canUndo} title="Undo (Ctrl+Z)" aria-label="Undo">
+        <button className="app-row" onClick={onUndo} disabled={!canUndo || protectedBoard} title={protectedBoard ? 'Curated marks are permanent' : 'Undo (Ctrl+Z)'} aria-label="Undo">
           <span className="app-row-name">Undo</span>
           <span className="app-row-key" aria-hidden="true">
             ^Z
@@ -157,7 +160,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
         <button
           className="app-row"
           onClick={onRedo}
-          disabled={!canRedo}
+          disabled={!canRedo || protectedBoard}
           title="Redo (Ctrl+Shift+Z)"
           aria-label="Redo"
         >
@@ -166,7 +169,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
             ^⇧Z
           </span>
         </button>
-        <button className="app-row app-row-danger" onClick={onClear} title="Wipe the plate for everyone" aria-label="Wipe plate">
+        <button className="app-row app-row-danger" onClick={onClear} disabled={protectedBoard} title={protectedBoard ? 'Curated plates cannot be wiped' : 'Wipe the plate for everyone'} aria-label="Wipe plate">
           <span className="app-row-name">Wipe</span>
         </button>
       </div>

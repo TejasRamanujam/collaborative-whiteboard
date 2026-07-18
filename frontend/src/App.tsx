@@ -160,14 +160,20 @@ function BoardIndex() {
                     open →
                   </span>
                 </button>
-                <button
-                  className="board-delete"
-                  aria-label={`Delete board ${b.name}`}
-                  title="Strike this plate from the ledger"
-                  onClick={() => handleDelete(b)}
-                >
-                  ✕
-                </button>
+                {b.protected ? (
+                  <span className="board-protected" title="Curated showcase plate — shared drawing remains enabled">
+                    proof
+                  </span>
+                ) : (
+                  <button
+                    className="board-delete"
+                    aria-label={`Delete board ${b.name}`}
+                    title="Strike this plate from the ledger"
+                    onClick={() => handleDelete(b)}
+                  >
+                    ✕
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -260,6 +266,7 @@ function Whiteboard() {
   const [showExport, setShowExport] = useState(false)
   const [events, setEvents] = useState<ReplayEvent[]>([])
   const [boardLoading, setBoardLoading] = useState(true)
+  const [protectedBoard, setProtectedBoard] = useState(false)
 
   // Per-user undo/redo: the stacks hold this client's own strokes only, so
   // undoing never deletes another participant's work on the shared board.
@@ -305,12 +312,13 @@ function Whiteboard() {
   // durable Neon event log (idempotent by stroke id, so no double-apply).
   const handleRealtimeEvent = useCallback((ev: BoardRoomEvent) => {
     if (replayingRef.current) return
+    if (protectedBoard && ev.event_type !== 'add') return
     setStrokes((prev) =>
       applyEventsToStrokes(prev, [
         { event_type: ev.event_type, stroke_data: ev.stroke_data } as ReplayEvent,
       ])
     )
-  }, [])
+  }, [protectedBoard])
 
   const {
     connected: rtConnected,
@@ -362,12 +370,16 @@ function Whiteboard() {
   useEffect(() => {
     if (boardId === null) return
     setBoardLoading(true)
+    setProtectedBoard(false)
     setEvents([])
     setStrokes([])
     undoStackRef.current = []
     redoStackRef.current = []
     fetchBoard(boardId).then((b) => {
-      if (b) setBoardName(b.name || 'Plate')
+      if (b) {
+        setBoardName(b.name || 'Plate')
+        setProtectedBoard(Boolean(b.protected))
+      }
     })
   }, [boardId])
 
@@ -405,6 +417,7 @@ function Whiteboard() {
   )
 
   const handleUndo = useCallback(() => {
+    if (protectedBoard) return
     const stroke = undoStackRef.current.pop()
     if (stroke) {
       replayingRef.current = false
@@ -412,9 +425,10 @@ function Whiteboard() {
       setStrokes((prev) => prev.filter((s) => s.id !== stroke.id))
       emitEvent('delete', { id: stroke.id })
     }
-  }, [emitEvent])
+  }, [emitEvent, protectedBoard])
 
   const handleRedo = useCallback(() => {
+    if (protectedBoard) return
     const stroke = redoStackRef.current.pop()
     if (stroke) {
       replayingRef.current = false
@@ -422,17 +436,18 @@ function Whiteboard() {
       setStrokes((prev) => [...prev.filter((s) => s.id !== stroke.id), stroke])
       emitEvent('add', stroke as unknown as Record<string, unknown>)
     }
-  }, [emitEvent])
+  }, [emitEvent, protectedBoard])
 
   // Clearing wipes the shared board for everyone and is not undoable.
   const handleClear = useCallback(() => {
+    if (protectedBoard) return
     if (!window.confirm('Wipe the plate for everyone? The timeline keeps the history.')) return
     replayingRef.current = false
     undoStackRef.current = []
     redoStackRef.current = []
     setStrokes([])
     emitEvent('clear', {})
-  }, [emitEvent])
+  }, [emitEvent, protectedBoard])
 
   const handleReplayEvent = useCallback((event: Record<string, unknown>) => {
     replayingRef.current = true
@@ -469,11 +484,15 @@ function Whiteboard() {
         return
       }
       const tool = keys[ev.key.toLowerCase()]
-      if (tool) setTool(tool)
+      if (tool && !(protectedBoard && tool === 'eraser')) setTool(tool)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [handleUndo, handleRedo])
+  }, [handleUndo, handleRedo, protectedBoard])
+
+  useEffect(() => {
+    if (protectedBoard && tool === 'eraser') setTool('pen')
+  }, [protectedBoard, tool])
 
   const sync = SYNC_META[rtConnected ? 'realtime' : syncStatus]
   const peers = remoteCursors.length
@@ -525,6 +544,7 @@ function Whiteboard() {
           onExport={() => setShowExport(true)}
           canUndo={undoStackRef.current.length > 0}
           canRedo={redoStackRef.current.length > 0}
+          protectedBoard={protectedBoard}
         />
 
         <div className="press-bed">
@@ -561,7 +581,7 @@ function Whiteboard() {
           </div>
           <div className="plate-caption" aria-hidden="true">
             <span>plate № {boardId !== null ? pad(boardId) : '--'} · dark litho stone</span>
-            <span>every stroke filed to the log</span>
+            <span>{protectedBoard ? 'curated proof · additive marks only' : 'every stroke filed to the log'}</span>
           </div>
         </div>
       </div>
