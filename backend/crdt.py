@@ -1,6 +1,5 @@
 """CRDT stroke data type using Last-Writer-Wins register semantics."""
 
-import time
 from typing import Any
 
 
@@ -22,25 +21,6 @@ def lww_merge(stroke_a: dict[str, Any] | None, stroke_b: dict[str, Any] | None) 
         return stroke_a
     else:
         return stroke_a if stroke_a.get("id", "") > stroke_b.get("id", "") else stroke_b
-
-
-def create_stroke(user_id: str, points: list, color: str, width: int, tool: str) -> dict:
-    stroke_id = f"{user_id}_{int(time.time() * 1000)}"
-    return {
-        "id": stroke_id,
-        "user_id": user_id,
-        "points": points,
-        "color": color,
-        "width": width,
-        "tool": tool,
-        "deleted": False,
-        "timestamp": time.time(),
-    }
-
-
-def update_stroke(stroke: dict, **updates) -> dict:
-    stroke = {**stroke, **updates, "timestamp": time.time()}
-    return stroke
 
 
 def merge_stroke_states(local: list[dict], remote: list[dict]) -> list[dict]:

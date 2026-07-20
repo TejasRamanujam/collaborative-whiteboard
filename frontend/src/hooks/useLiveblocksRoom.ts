@@ -14,6 +14,11 @@ export interface RemoteCursor {
   cursor: { x: number; y: number }
 }
 
+export interface RoomParticipant {
+  connectionId: number
+  name: string
+}
+
 /** Stroke event broadcast through the room (mirrors the REST event shape). */
 export type BoardRoomEvent = {
   event_type: string
@@ -64,6 +69,7 @@ export function useLiveblocksRoom(
 ) {
   const [connected, setConnected] = useState(false)
   const [others, setOthers] = useState<RemoteCursor[]>([])
+  const [participants, setParticipants] = useState<RoomParticipant[]>([])
   const roomRef = useRef<BoardRoomHandle | null>(null)
   const onRemoteEventRef = useRef(onRemoteEvent)
   onRemoteEventRef.current = onRemoteEvent
@@ -89,17 +95,21 @@ export function useLiveblocksRoom(
         }),
         room.subscribe('others', (list) => {
           const cursors: RemoteCursor[] = []
+          const roster: RoomParticipant[] = []
           for (const o of list) {
             const p = o.presence as unknown as CursorPresence | undefined
+            const name = typeof p?.name === 'string' && p.name ? p.name : 'guest'
+            roster.push({ connectionId: o.connectionId, name })
             if (p && p.cursor) {
               cursors.push({
                 connectionId: o.connectionId,
-                name: typeof p.name === 'string' && p.name ? p.name : 'guest',
+                name,
                 cursor: p.cursor,
               })
             }
           }
           setOthers(cursors)
+          setParticipants(roster)
         })
       )
     } catch {
@@ -110,6 +120,7 @@ export function useLiveblocksRoom(
       roomRef.current = null
       setConnected(false)
       setOthers([])
+      setParticipants([])
       leaveFn?.()
     }
   }, [boardId, userId])
@@ -130,5 +141,5 @@ export function useLiveblocksRoom(
     }
   }, [])
 
-  return { connected, others, broadcast, updateCursor }
+  return { connected, others, participants, broadcast, updateCursor }
 }

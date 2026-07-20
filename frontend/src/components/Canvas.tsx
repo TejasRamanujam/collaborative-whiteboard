@@ -1,109 +1,25 @@
-import React, { useRef, useEffect, useCallback, useState } from 'react'
-import { Stroke, Point, Tool } from '../types'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { drawStroke, findStrokeAt, strokeBounds, translateStroke } from '../drawing'
+import type { Point, Stroke, Tool, ViewTransform } from '../types'
 
 interface CanvasProps {
   strokes: Stroke[]
   tool: Tool
   color: string
   width: number
+  view: ViewTransform
+  onViewChange: (view: ViewTransform) => void
   onStrokeAdd: (stroke: Stroke) => void
   onStrokeUpdate: (stroke: Stroke) => void
   onStrokeEnd?: (stroke: Stroke) => void
+  onStrokeCommit?: (stroke: Stroke) => void
   onCursorMove?: (x: number, y: number) => void
   readOnly?: boolean
 }
 
-interface ShapeDraft {
-  type: 'rectangle' | 'circle' | 'line'
-  startX: number
-  startY: number
-  endX: number
-  endY: number
-}
-
-const USER_COLORS = [
-  '#ff6b6b', '#ffd93d', '#6bcb77', '#4d96ff',
-  '#ff8c32', '#845ec2', '#00c9a7', '#c34a36',
-]
-
-function getUserColor(userId: string): string {
-  let hash = 0
-  for (let i = 0; i < userId.length; i++) {
-    hash = userId.charCodeAt(i) + ((hash << 5) - hash)
-  }
-  return USER_COLORS[Math.abs(hash) % USER_COLORS.length]
-}
-
-function smoothPoints(points: Point[]): Point[] {
-  if (points.length < 3) return points
-  const smoothed: Point[] = [points[0]]
-  for (let i = 1; i < points.length - 1; i++) {
-    smoothed.push({
-      x: (points[i - 1].x + points[i].x + points[i + 1].x) / 3,
-      y: (points[i - 1].y + points[i].y + points[i + 1].y) / 3,
-      pressure: points[i].pressure,
-    })
-  }
-  smoothed.push(points[points.length - 1])
-  return smoothed
-}
-
-function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke) {
-  const pts = smoothPoints(stroke.points || [])
-  if (pts.length === 0) return
-
-  ctx.save()
-  ctx.strokeStyle = stroke.tool === 'eraser' ? '#0f1117' : stroke.color
-  ctx.lineWidth = stroke.width
-  ctx.lineCap = 'round'
-  ctx.lineJoin = 'round'
-
-  if (stroke.tool === 'highlighter') {
-    ctx.globalAlpha = 0.3
-    ctx.lineWidth = stroke.width * 3
-  } else if (stroke.tool === 'rectangle') {
-    if (pts.length >= 2) {
-      const start = pts[0]
-      const end = pts[pts.length - 1]
-      ctx.strokeRect(start.x, start.y, end.x - start.x, end.y - start.y)
-      ctx.restore()
-      return
-    }
-  } else if (stroke.tool === 'circle') {
-    if (pts.length >= 2) {
-      const start = pts[0]
-      const end = pts[pts.length - 1]
-      const cx = (start.x + end.x) / 2
-      const cy = (start.y + end.y) / 2
-      const rx = Math.abs(end.x - start.x) / 2
-      const ry = Math.abs(end.y - start.y) / 2
-      ctx.beginPath()
-      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
-      ctx.stroke()
-      ctx.restore()
-      return
-    }
-  }
-
-  ctx.beginPath()
-  if (pts.length === 1) {
-    ctx.arc(pts[0].x, pts[0].y, stroke.width / 4, 0, Math.PI * 2)
-    ctx.fillStyle = stroke.tool === 'eraser' ? '#0f1117' : stroke.color
-    ctx.fill()
-  } else {
-    ctx.moveTo(pts[0].x, pts[0].y)
-    for (let i = 1; i < pts.length; i++) {
-      const midX = (pts[i - 1].x + pts[i].x) / 2
-      const midY = (pts[i - 1].y + pts[i].y) / 2
-      if (i === 1) {
-        ctx.lineTo(midX, midY)
-      }
-      ctx.quadraticCurveTo(pts[i - 1].x, pts[i - 1].y, midX, midY)
-    }
-    ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y)
-    ctx.stroke()
-  }
-  ctx.restore()
+interface TextDraft {
+  point: Point
+  value: string
 }
 
 const Canvas: React.FC<CanvasProps> = ({
@@ -111,244 +27,316 @@ const Canvas: React.FC<CanvasProps> = ({
   tool,
   color,
   width,
+  view,
+  onViewChange,
   onStrokeAdd,
   onStrokeUpdate,
   onStrokeEnd,
+  onStrokeCommit,
   onCursorMove,
   readOnly,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const offscreenRef = useRef<HTMLCanvasElement | null>(null)
-  const isDrawingRef = useRef(false)
   const currentStrokeRef = useRef<Stroke | null>(null)
-  const animFrameRef = useRef<number>(0)
-  const shapeDraftRef = useRef<ShapeDraft | null>(null)
-  const [, setRenderTick] = useState(0)
+  const drawingRef = useRef(false)
+  const spaceRef = useRef(false)
+  const panRef = useRef<{ clientX: number; clientY: number; x: number; y: number } | null>(null)
+  const imageCacheRef = useRef(new Map<string, HTMLImageElement>())
+  const textCommittingRef = useRef(false)
+  const selectionDragRef = useRef<{ origin: Point; original: Stroke; current: Stroke; moved: boolean } | null>(null)
+  const [textDraft, setTextDraft] = useState<TextDraft | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const renderAll = useCallback(() => {
     const canvas = canvasRef.current
-    if (!canvas) return
-
-    let offscreen = offscreenRef.current
-    if (!offscreen) {
-      offscreen = document.createElement('canvas')
-      offscreenRef.current = offscreen
-    }
-    // Keep the offscreen buffer the same size as the visible canvas; otherwise
-    // strokes outside the buffer's initial (default 300x150) size get clipped,
-    // leaving the board blank after a resize/reload.
-    if (offscreen.width !== canvas.width || offscreen.height !== canvas.height) {
-      offscreen.width = canvas.width
-      offscreen.height = canvas.height
-    }
-
-    const ctx = offscreen.getContext('2d')
-    if (!ctx) return
-
-    ctx.clearRect(0, 0, offscreen.width, offscreen.height)
+    const ctx = canvas?.getContext('2d')
+    if (!canvas || !ctx) return
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.fillStyle = '#0f1117'
-    ctx.fillRect(0, 0, offscreen.width, offscreen.height)
-
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.save()
+    ctx.translate(view.x, view.y)
+    ctx.scale(view.scale, view.scale)
     for (const stroke of strokes) {
       if (stroke.deleted) continue
       if (stroke.image_data) {
-        const img = new Image()
-        img.src = stroke.image_data
-        if (img.complete) {
-          ctx.drawImage(img, stroke.x || 50, stroke.y || 50)
-        } else {
-          img.onload = () => {
-            ctx.drawImage(img, stroke.x || 50, stroke.y || 50)
-          }
+        let image = imageCacheRef.current.get(stroke.image_data)
+        if (!image) {
+          image = new Image()
+          image.src = stroke.image_data
+          image.onload = renderAll
+          imageCacheRef.current.set(stroke.image_data, image)
         }
-        continue
+        if (image.complete) ctx.drawImage(image, stroke.x ?? 50, stroke.y ?? 50)
+      } else {
+        drawStroke(ctx, stroke)
       }
-      drawStroke(ctx, stroke)
     }
+    const selected = strokes.find((stroke) => stroke.id === selectedId)
+    const bounds = selected ? strokeBounds(selected) : null
+    if (bounds) {
+      const padding = 5 / view.scale
+      ctx.save()
+      ctx.strokeStyle = '#ff6a3d'
+      ctx.lineWidth = 1.5 / view.scale
+      ctx.setLineDash([6 / view.scale, 4 / view.scale])
+      ctx.strokeRect(
+        bounds.minX - padding,
+        bounds.minY - padding,
+        bounds.maxX - bounds.minX + padding * 2,
+        bounds.maxY - bounds.minY + padding * 2
+      )
+      ctx.restore()
+    }
+    ctx.restore()
+  }, [selectedId, strokes, view])
 
-    const mainCtx = canvas.getContext('2d')
-    if (mainCtx) {
-      mainCtx.clearRect(0, 0, canvas.width, canvas.height)
-      mainCtx.drawImage(offscreen, 0, 0)
-    }
-  }, [strokes])
+  useEffect(() => renderAll(), [renderAll])
 
   useEffect(() => {
-    renderAll()
-  }, [renderAll])
+    if (tool !== 'select') setSelectedId(null)
+  }, [tool])
 
   useEffect(() => {
+    if (selectedId && !strokes.some((stroke) => stroke.id === selectedId && !stroke.deleted)) {
+      setSelectedId(null)
+    }
+  }, [selectedId, strokes])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    const parent = canvas?.parentElement
+    if (!canvas || !parent) return
     const resize = () => {
-      const canvas = canvasRef.current
-      if (!canvas) return
-      const rect = canvas.parentElement?.getBoundingClientRect()
-      if (rect) {
-        canvas.width = rect.width
-        canvas.height = rect.height
-        renderAll()
-      }
+      const rect = parent.getBoundingClientRect()
+      canvas.width = Math.max(1, Math.round(rect.width))
+      canvas.height = Math.max(1, Math.round(rect.height))
+      renderAll()
     }
+    const observer = new ResizeObserver(resize)
+    observer.observe(parent)
     resize()
-    window.addEventListener('resize', resize)
-    return () => window.removeEventListener('resize', resize)
+    return () => observer.disconnect()
   }, [renderAll])
 
-  const getCanvasPoint = useCallback((e: React.MouseEvent | React.TouchEvent): Point => {
-    const canvas = canvasRef.current!
-    const rect = canvas.getBoundingClientRect()
-    let clientX: number, clientY: number
-    if ('touches' in e) {
-      const touch = e.touches[0] || e.changedTouches[0]
-      clientX = touch.clientX
-      clientY = touch.clientY
-    } else {
-      clientX = e.clientX
-      clientY = e.clientY
+  useEffect(() => {
+    const keyDown = (event: KeyboardEvent) => {
+      if (event.code === 'Space' && !(event.target instanceof HTMLInputElement)) {
+        spaceRef.current = true
+      }
     }
-    return {
-      x: clientX - rect.left,
-      y: clientY - rect.top,
-      pressure: 0.5,
+    const keyUp = (event: KeyboardEvent) => {
+      if (event.code === 'Space') spaceRef.current = false
+    }
+    window.addEventListener('keydown', keyDown)
+    window.addEventListener('keyup', keyUp)
+    return () => {
+      window.removeEventListener('keydown', keyDown)
+      window.removeEventListener('keyup', keyUp)
     }
   }, [])
 
-  const startDraw = useCallback(
-    (e: React.MouseEvent | React.TouchEvent) => {
-      if (readOnly) return
-      e.preventDefault()
-      const pt = getCanvasPoint(e)
-      isDrawingRef.current = true
+  const eventPosition = useCallback((event: React.MouseEvent | React.TouchEvent) => {
+    const rect = canvasRef.current!.getBoundingClientRect()
+    const source = 'touches' in event
+      ? (event.touches[0] || event.changedTouches[0])
+      : event
+    return { clientX: source.clientX, clientY: source.clientY, x: source.clientX - rect.left, y: source.clientY - rect.top }
+  }, [])
 
-      const userId = localStorage.getItem('whiteboard_user_id') || 'user'
+  const getCanvasPoint = useCallback((event: React.MouseEvent | React.TouchEvent): Point => {
+    const position = eventPosition(event)
+    return {
+      x: (position.x - view.x) / view.scale,
+      y: (position.y - view.y) / view.scale,
+      pressure: 0.5,
+    }
+  }, [eventPosition, view])
 
-      if (tool === 'rectangle' || tool === 'circle' || tool === 'line') {
-        shapeDraftRef.current = {
-          type: tool as 'rectangle' | 'circle' | 'line',
-          startX: pt.x,
-          startY: pt.y,
-          endX: pt.x,
-          endY: pt.y,
-        }
-        currentStrokeRef.current = {
-          id: `${userId}_${Date.now()}`,
-          user_id: userId,
-          points: [pt],
-          color,
-          width,
-          tool,
-          deleted: false,
-          timestamp: Date.now(),
-        }
-        onStrokeAdd(currentStrokeRef.current)
-        return
-      }
+  const startDraw = useCallback((event: React.MouseEvent | React.TouchEvent) => {
+    const position = eventPosition(event)
+    const panGesture = 'button' in event && (event.button === 1 || spaceRef.current)
+    if (panGesture) {
+      event.preventDefault()
+      panRef.current = { clientX: position.clientX, clientY: position.clientY, x: view.x, y: view.y }
+      return
+    }
+    if (readOnly) return
+    event.preventDefault()
+    const point = getCanvasPoint(event)
+    onCursorMove?.(point.x, point.y)
+    if (tool === 'select') {
+      const selected = findStrokeAt(strokes, point, 8 / view.scale)
+      setSelectedId(selected?.id ?? null)
+      selectionDragRef.current = selected
+        ? { origin: point, original: selected, current: selected, moved: false }
+        : null
+      return
+    }
+    if (tool === 'text') {
+      textCommittingRef.current = false
+      setTextDraft({ point, value: '' })
+      return
+    }
 
-      currentStrokeRef.current = {
-        id: `${userId}_${Date.now()}`,
-        user_id: userId,
-        points: [pt],
-        color: tool === 'eraser' ? '#0f1117' : color,
-        width: tool === 'highlighter' ? width * 2 : tool === 'eraser' ? width * 2 : width,
-        tool,
-        deleted: false,
-        timestamp: Date.now(),
-      }
-      onStrokeAdd(currentStrokeRef.current)
-    },
-    [color, width, tool, readOnly, getCanvasPoint, onStrokeAdd]
-  )
+    const userId = localStorage.getItem('whiteboard_user_id') || 'user'
+    const stroke: Stroke = {
+      id: `${userId}_${Date.now()}`,
+      user_id: userId,
+      points: [point],
+      color: tool === 'eraser' ? '#0f1117' : color,
+      width: tool === 'highlighter' || tool === 'eraser' ? width * 2 : width,
+      tool,
+      deleted: false,
+      timestamp: Date.now(),
+    }
+    drawingRef.current = true
+    currentStrokeRef.current = stroke
+    onStrokeAdd(stroke)
+  }, [color, eventPosition, getCanvasPoint, onCursorMove, onStrokeAdd, readOnly, strokes, tool, view, width])
 
-  const draw = useCallback(
-    (e: React.MouseEvent | React.TouchEvent) => {
-      if (!isDrawingRef.current || readOnly) return
-      e.preventDefault()
-      const pt = getCanvasPoint(e)
-      onCursorMove?.(pt.x, pt.y)
+  const move = useCallback((event: React.MouseEvent | React.TouchEvent) => {
+    const position = eventPosition(event)
+    if (panRef.current) {
+      event.preventDefault()
+      onViewChange({
+        ...view,
+        x: panRef.current.x + position.clientX - panRef.current.clientX,
+        y: panRef.current.y + position.clientY - panRef.current.clientY,
+      })
+      return
+    }
+    const point = getCanvasPoint(event)
+    onCursorMove?.(point.x, point.y)
+    if (selectionDragRef.current && !readOnly) {
+      event.preventDefault()
+      const translated = translateStroke(
+        selectionDragRef.current.original,
+        point.x - selectionDragRef.current.origin.x,
+        point.y - selectionDragRef.current.origin.y
+      )
+      selectionDragRef.current.current = translated
+      selectionDragRef.current.moved = true
+      onStrokeUpdate(translated)
+      return
+    }
+    if (!drawingRef.current || !currentStrokeRef.current || readOnly) return
+    event.preventDefault()
+    const shape = ['rectangle', 'circle', 'line'].includes(currentStrokeRef.current.tool)
+    const points = shape
+      ? [currentStrokeRef.current.points[0], point]
+      : [...currentStrokeRef.current.points, point]
+    const updated = { ...currentStrokeRef.current, points, timestamp: Date.now() }
+    currentStrokeRef.current = updated
+    onStrokeUpdate(updated)
+  }, [eventPosition, getCanvasPoint, onCursorMove, onStrokeUpdate, onViewChange, readOnly, view])
 
-      if (shapeDraftRef.current) {
-        shapeDraftRef.current.endX = pt.x
-        shapeDraftRef.current.endY = pt.y
-        if (currentStrokeRef.current) {
-          const updated = {
-            ...currentStrokeRef.current,
-            points: [
-              { x: shapeDraftRef.current.startX, y: shapeDraftRef.current.startY, pressure: 0.5 },
-              pt,
-            ],
-          }
-          currentStrokeRef.current = updated
-          onStrokeUpdate(updated)
-        }
-        renderAll()
-        const canvas = canvasRef.current!
-        const ctx = canvas.getContext('2d')!
-        ctx.save()
-        ctx.strokeStyle = color
-        ctx.lineWidth = width
-        const sd = shapeDraftRef.current
-        if (sd.type === 'rectangle') {
-          ctx.strokeRect(sd.startX, sd.startY, sd.endX - sd.startX, sd.endY - sd.startY)
-        } else if (sd.type === 'circle') {
-          const cx = (sd.startX + sd.endX) / 2
-          const cy = (sd.startY + sd.endY) / 2
-          const rx = Math.abs(sd.endX - sd.startX) / 2
-          const ry = Math.abs(sd.endY - sd.startY) / 2
-          ctx.beginPath()
-          ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
-          ctx.stroke()
-        } else if (sd.type === 'line') {
-          ctx.beginPath()
-          ctx.moveTo(sd.startX, sd.startY)
-          ctx.lineTo(sd.endX, sd.endY)
-          ctx.stroke()
-        }
-        ctx.restore()
-        return
-      }
+  const endDraw = useCallback(() => {
+    if (panRef.current) {
+      panRef.current = null
+      return
+    }
+    if (selectionDragRef.current) {
+      const { current: moved, moved: didMove } = selectionDragRef.current
+      selectionDragRef.current = null
+      if (didMove) onStrokeCommit?.(moved)
+      return
+    }
+    if (!drawingRef.current) return
+    const finished = currentStrokeRef.current
+    drawingRef.current = false
+    currentStrokeRef.current = null
+    if (finished) onStrokeEnd?.(finished)
+  }, [onStrokeCommit, onStrokeEnd])
 
-      if (!currentStrokeRef.current) return
-      const updated = {
-        ...currentStrokeRef.current,
-        points: [...currentStrokeRef.current.points, pt],
-        timestamp: Date.now(),
-      }
-      currentStrokeRef.current = updated
-      onStrokeUpdate(updated)
+  const commitText = useCallback((value: string) => {
+    if (textCommittingRef.current) return
+    textCommittingRef.current = true
+    const draft = textDraft
+    setTextDraft(null)
+    if (!draft || !value.trim()) return
+    const userId = localStorage.getItem('whiteboard_user_id') || 'user'
+    const stroke: Stroke = {
+      id: `${userId}_${Date.now()}`,
+      user_id: userId,
+      points: [draft.point],
+      color,
+      width,
+      tool: 'text',
+      text: value.trim(),
+      font_size: Math.max(16, 12 + width * 2),
+      deleted: false,
+      timestamp: Date.now(),
+    }
+    onStrokeAdd(stroke)
+    onStrokeEnd?.(stroke)
+  }, [color, onStrokeAdd, onStrokeEnd, textDraft, width])
 
-      renderAll()
-      const canvas = canvasRef.current!
-      const ctx = canvas.getContext('2d')!
-      drawStroke(ctx, currentStrokeRef.current)
-    },
-    [color, width, readOnly, getCanvasPoint, onCursorMove, onStrokeUpdate, renderAll]
-  )
+  // React registers wheel listeners as passive, so preventDefault inside
+  // onWheel is ignored — attach a non-passive native listener instead.
+  const zoom = useCallback((event: WheelEvent) => {
+    event.preventDefault()
+    const rect = canvasRef.current!.getBoundingClientRect()
+    const x = event.clientX - rect.left
+    const y = event.clientY - rect.top
+    const scale = Math.min(4, Math.max(0.25, view.scale * Math.exp(-event.deltaY * 0.0015)))
+    const worldX = (x - view.x) / view.scale
+    const worldY = (y - view.y) / view.scale
+    onViewChange({ scale, x: x - worldX * scale, y: y - worldY * scale })
+  }, [onViewChange, view])
 
-  const endDraw = useCallback(
-    (e: React.MouseEvent | React.TouchEvent) => {
-      if (!isDrawingRef.current || readOnly) return
-      const finished = currentStrokeRef.current
-      isDrawingRef.current = false
-      shapeDraftRef.current = null
-      currentStrokeRef.current = null
-      renderAll()
-      if (finished && onStrokeEnd) onStrokeEnd(finished)
-    },
-    [readOnly, renderAll, onStrokeEnd]
-  )
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    canvas.addEventListener('wheel', zoom, { passive: false })
+    return () => canvas.removeEventListener('wheel', zoom)
+  }, [zoom])
 
   return (
-    <canvas
-      ref={canvasRef}
-      className="whiteboard-canvas"
-      onMouseDown={startDraw}
-      onMouseMove={draw}
-      onMouseUp={endDraw}
-      onMouseLeave={endDraw}
-      onTouchStart={startDraw}
-      onTouchMove={draw}
-      onTouchEnd={endDraw}
-      style={{ touchAction: 'none', width: '100%', height: '100%' }}
-    />
+    <div className="canvas-stage">
+      <canvas
+        ref={canvasRef}
+        className="whiteboard-canvas"
+        data-tool={tool}
+        onMouseDown={startDraw}
+        onMouseMove={move}
+        onMouseUp={endDraw}
+        onMouseLeave={endDraw}
+        onTouchStart={startDraw}
+        onTouchMove={move}
+        onTouchEnd={endDraw}
+        onDoubleClick={() => onViewChange({ x: 0, y: 0, scale: 1 })}
+        style={{ touchAction: 'none', width: '100%', height: '100%' }}
+      />
+      {textDraft && (
+        <input
+          className="canvas-text-input"
+          style={{
+            left: textDraft.point.x * view.scale + view.x,
+            top: textDraft.point.y * view.scale + view.y,
+            color,
+            fontSize: Math.max(16, 12 + width * 2) * view.scale,
+          }}
+          value={textDraft.value}
+          onChange={(event) => setTextDraft({ ...textDraft, value: event.target.value })}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              commitText(textDraft.value)
+            } else if (event.key === 'Escape') {
+              setTextDraft(null)
+            }
+          }}
+          onBlur={() => commitText(textDraft.value)}
+          aria-label="Text on plate"
+          autoFocus
+        />
+      )}
+      <div className="view-controls" aria-label="Canvas view controls">
+        <span>{Math.round(view.scale * 100)}%</span>
+        <button type="button" onClick={() => onViewChange({ x: 0, y: 0, scale: 1 })}>fit</button>
+      </div>
+    </div>
   )
 }
 

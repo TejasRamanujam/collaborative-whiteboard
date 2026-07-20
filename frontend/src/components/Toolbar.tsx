@@ -8,12 +8,14 @@ import { Tool } from '../types'
  */
 
 const TOOLS: { id: Tool; label: string; hotkey: string }[] = [
+  { id: 'select', label: 'Select', hotkey: 'V' },
   { id: 'pen', label: 'Pen', hotkey: 'P' },
   { id: 'highlighter', label: 'Marker', hotkey: 'M' },
   { id: 'eraser', label: 'Eraser', hotkey: 'E' },
   { id: 'rectangle', label: 'Rectangle', hotkey: 'R' },
   { id: 'circle', label: 'Ellipse', hotkey: 'O' },
   { id: 'line', label: 'Line', hotkey: 'L' },
+  { id: 'text', label: 'Text', hotkey: 'T' },
 ]
 
 /* Proofing inks — light pigments that read on the dark litho plate. */
@@ -77,7 +79,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
             title={`${t.label} (${t.hotkey})`}
             aria-label={`${t.label}, hotkey ${t.hotkey}`}
             aria-pressed={tool === t.id}
-            disabled={protectedBoard && t.id === 'eraser'}
+            disabled={protectedBoard && (t.id === 'eraser' || t.id === 'select')}
           >
             <span className="app-row-name">{t.label}</span>
             <span className="app-row-key" aria-hidden="true">

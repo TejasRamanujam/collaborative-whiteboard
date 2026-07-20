@@ -12,6 +12,7 @@ interface SessionTimelineProps {
   events: ReplayEvent[]
   onReplayEvent: (event: Record<string, unknown>) => void
   onEventSeek: (index: number) => void
+  onResetToLive: () => void
   /** Start one replay pass automatically (first visit to a seeded board). */
   autoplay?: boolean
 }
@@ -28,6 +29,7 @@ const SessionTimeline: React.FC<SessionTimelineProps> = ({
   events,
   onReplayEvent,
   onEventSeek,
+  onResetToLive,
   autoplay,
 }) => {
   const [playing, setPlaying] = useState(false)
@@ -71,6 +73,9 @@ const SessionTimeline: React.FC<SessionTimelineProps> = ({
       const next = indexRef.current + 1
       if (next >= events.length) {
         stop()
+        indexRef.current = -1
+        setCurrentIndex(-1)
+        onResetToLive()
         return
       }
       indexRef.current = next
@@ -97,7 +102,7 @@ const SessionTimeline: React.FC<SessionTimelineProps> = ({
     stop()
     indexRef.current = -1
     setCurrentIndex(-1)
-    onEventSeek(-1)
+    onResetToLive()
   }
 
   const atLive = currentIndex < 0 || currentIndex >= events.length - 1

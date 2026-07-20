@@ -1,5 +1,6 @@
 import React from 'react'
 import { RemoteCursor } from '../hooks/useLiveblocksRoom'
+import type { ViewTransform } from '../types'
 
 /** Per-user proofing inks — light pigments that read on the dark plate. */
 const USER_COLORS = [
@@ -7,7 +8,7 @@ const USER_COLORS = [
   '#f193b4', '#a4d474', '#f2ede0', '#b9b0a2',
 ]
 
-function getUserColor(name: string): string {
+export function getUserColor(name: string): string {
   let hash = 0
   for (let i = 0; i < name.length; i++) {
     hash = name.charCodeAt(i) + ((hash << 5) - hash)
@@ -20,7 +21,7 @@ function getUserColor(name: string): string {
  * Each renders as a drafting pointer: a fine crosshair with a name slip
  * in that artist's ink.
  */
-const PresenceCursors: React.FC<{ cursors: RemoteCursor[] }> = ({ cursors }) => {
+const PresenceCursors: React.FC<{ cursors: RemoteCursor[]; view: ViewTransform }> = ({ cursors, view }) => {
   return (
     <>
       {cursors.map((c) => {
@@ -29,7 +30,7 @@ const PresenceCursors: React.FC<{ cursors: RemoteCursor[] }> = ({ cursors }) => 
           <div
             key={c.connectionId}
             className="presence-cursor"
-            style={{ left: c.cursor.x, top: c.cursor.y, color }}
+            style={{ left: c.cursor.x * view.scale + view.x, top: c.cursor.y * view.scale + view.y, color }}
           >
             <svg className="presence-reticle" viewBox="0 0 28 28" width="24" height="24" aria-hidden="true">
               <path

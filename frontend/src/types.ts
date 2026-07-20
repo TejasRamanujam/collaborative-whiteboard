@@ -16,6 +16,14 @@ export interface Stroke {
   image_data?: string
   x?: number
   y?: number
+  text?: string
+  font_size?: number
+}
+
+export interface ViewTransform {
+  x: number
+  y: number
+  scale: number
 }
 
 export interface Board {
@@ -26,19 +34,5 @@ export interface Board {
   protected?: boolean
 }
 
-export interface CursorPosition {
-  x: number
-  y: number
-  user_id: string
-}
-
 export type Tool = 'pen' | 'highlighter' | 'eraser' | 'rectangle' | 'circle' | 'line' | 'text' | 'select'
 
-export interface DrawingState {
-  isDrawing: boolean
-  currentStroke: Stroke | null
-  tool: Tool
-  color: string
-  width: number
-  startPoint: Point | null
-}
