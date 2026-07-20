@@ -104,11 +104,6 @@ class BoardManager:
         self._ensure_board(board_id)
         self.boards[board_id]["strokes"] = strokes
 
-    def get_cursors(self, board_id: int) -> dict:
-        if board_id not in self.boards:
-            return {}
-        return dict(self.boards[board_id].get("cursors", {}))
-
     def handle_stroke_sync(self, board_id: int, data: dict, event_type: str):
         self._ensure_board(board_id)
         board = self.boards[board_id]
@@ -137,11 +132,6 @@ class BoardManager:
                 {"type": "stroke_event", "data": data, "event_type": event_type},
             )
         )
-
-    def get_user_count(self, board_id: int) -> int:
-        if board_id not in self.boards:
-            return 0
-        return len(self.boards[board_id]["users"])
 
 
 board_manager = BoardManager()

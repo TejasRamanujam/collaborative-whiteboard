@@ -434,15 +434,6 @@
   flex: none;
 }
 
-.peers-chip {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.16em;
-  color: var(--ink-70);
-  border-bottom: 1px dotted var(--rule);
-  padding-bottom: 1px;
-}
-
 .presence-roster {
   display: flex;
   align-items: center;
